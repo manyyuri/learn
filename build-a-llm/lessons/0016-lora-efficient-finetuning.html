@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 16 课 · LoRA 参数高效微调</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 16 课 · Build a LLM From Scratch · 对应书附录 E · 最后一课 🎓</p>
+  <h1>LoRA：动 2% 的参数，办 100% 的事</h1>
+  <p class="subtitle">微调 70B 模型存不下多份全量权重？低秩适应（LoRA）只训练并保存一对小矩阵——124M 参数的模型只训 266 万个，效果几乎不打折。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：三件套",
+      "questions": [
+        {
+          "q": "学习率预热的动作是？",
+          "options": ["从小值线性爬升", "从峰值直接减半", "按梯度自动调节", "随机采样一个值"],
+          "answer": 0,
+          "explain": "前 N 步从 initial_lr 线性升到 peak_lr，避免开局大更新。"
+        },
+        {
+          "q": "余弦衰减在什么阶段生效？",
+          "options": ["预热结束之后", "预热开始之前", "梯度裁剪之后", "epoch 边界处"],
+          "answer": 0,
+          "explain": "先爬坡、后滑落：预热结束后沿半余弦周期降到 min_lr。"
+        },
+        {
+          "q": "梯度裁剪缩放的依据是？",
+          "options": ["梯度的范数大小", "损失的具体数值", "学习率的倒数", "参数的总数量"],
+          "answer": 0,
+          "explain": "L2 范数超阈值就等比例缩小到 max_norm，方向不变。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>核心思想：低秩近似 ΔW</h2>
+  <p>普通微调中，反向传播为每个权重矩阵 W 学一个同样大小的更新 ΔW：<code>W' = W + ΔW</code>。<span class="term">LoRA<span class="en">（Low-Rank Adaptation，低秩适应）</span></span>的洞察（Hu et al., <i>LoRA: Low-Rank Adaptation of Large Language Models</i>, arXiv:2106.09685）：微调所需的 ΔW 是<b>低秩的</b>——可以用两个小矩阵的乘积近似：</p>
+
+<pre><code>W' = W + B·A
+# W:  [768 × 768]（冻结，不动）
+# A:  [r × 768]，B: [768 × r]    ← 只训练这两个小矩阵
+# r（秩）≪ 768，比如 r = 16</code></pre>
+
+  <p>参数账（以一层 768×768 为例）：全量微调 590K 参数；LoRA（r=16）只要 768×16 + 16×768 = <b>24.6K</b>——4%。<b>W 保持原样，"改动量"单独存放在 A、B 里</b>。这个分离是 LoRA 在工程上最妙的地方（下一节）。</p>
+  <span class="cite">——《书》附录 E.1, pp.363–364（图 E.1）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>实现：给 Linear 层穿外挂</h2>
+
+<pre><code class="language-python">class LoRALayer(nn.Module):
+    def __init__(self, in_dim, out_dim, rank, alpha):
+        super().__init__()
+        self.A = nn.Parameter(torch.empty(rank, in_dim))     # 高斯随机初始化
+        self.B = nn.Parameter(torch.zeros(out_dim, rank))    # ← 零初始化！
+        self.alpha = alpha        # 缩放因子：控制 LoRA 输出的影响强度
+
+    def forward(self, x):
+        return self.alpha * (x @ self.A.T) @ self.B.T
+
+class LinearWithLoRA(nn.Module):
+    def __init__(self, linear, rank, alpha):
+        super().__init__()
+        self.linear = linear                     # 原层（已冻结）
+        self.lora = LoRALayer(linear.in_features,
+                              linear.out_features, rank, alpha)
+    def forward(self, x):
+        return self.linear(x) + self.lora(x)     # 原输出 + 低秩修正
+
+replace_linear_with_lora(model, rank=16, alpha=16)   # 给模型所有 Linear 穿外挂</code></pre>
+
+  <p>两个精妙细节：</p>
+  <ul>
+    <li><b>B 初始化为零</b> → B·A = 0 → 穿上外挂的模型与原模型<b>完全等价</b>（书实测：替换后准确率 46.25%/45.00%/48.75%，与替换前分毫不差）。训练从"与原模型同一起点"出发。</li>
+    <li><b>alpha 缩放</b>：调节低秩修正对层输出的影响强度，常取 rank 的一半、一倍或两倍。</li>
+  </ul>
+  <span class="cite">——《书》附录 E.4, pp.369–374（列表 E.6）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>实战：垃圾短信分类器重制版</h2>
+  <p>重跑第 13 课的任务（gpt2-small + 换头），但这次先冻结全部 124M 参数，再给所有 Linear 层换上 LoRA：</p>
+  <table>
+    <tr><th></th><th>可训练参数</th><th>占比</th></tr>
+    <tr><td>全量微调（第 13 课路线）</td><td>124,441,346</td><td>100%</td></tr>
+    <tr><td><b>LoRA (r=16)</b></td><td><b>2,666,528</b></td><td><b>≈2%</b>（少 47 倍）</td></tr>
+  </table>
+  <p>用第 13 课原样的训练循环微调 5 epoch（M3 MacBook 约 12 分钟）：训练准确率 100%，验证 96.64%，测试约 98%——<b>与全量微调基本持平</b>。注意一个反直觉点：小模型上 LoRA 训练反而更慢（前向多了计算）；但模型越大、反向传播越贵，LoRA 的省就越是压倒性的。</p>
+  <span class="cite">——《书》附录 E.4, pp.374–378（列表 E.7，图 E.5）</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>为什么工程师爱它：一份底座，千份外挂</h2>
+  <p>LoRA 矩阵与 W 分离，带来工程红利：</p>
+  <ul>
+    <li><b>存储</b>：一个 70B 底座 + 每个客户/任务一个小 LoRA（几 MB），而不是几十份 140GB 的完整模型</li>
+    <li><b>推理零开销</b>：部署前可把 B·A 直接<b>合并</b>进 W（W' = W + BA），推理时就是普通模型，不多一次乘法</li>
+    <li><b>切换灵活</b>：不合并也行——运行时热插拔不同任务的 A、B，同一底座秒变客服模型/代码模型/翻译模型</li>
+    <li><b>显存友好</b>：优化器状态只为可训练参数保留——这是大模型上省显存的大头</li>
+  </ul>
+  <p>这正是当下开源社区的现实：Hugging Face 上满地的 "base + LoRA adapter" 组合，QLoRA 等变体（底座再量化到 4-bit）把消费级显卡微调 33B 模型变成可能。</p>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题 · 最后一课的检验",
+      "questions": [
+        {
+          "q": "LoRA 的核心公式是？",
+          "options": ["W 加上 B 乘 A", "W 乘以 B 加 A", "B 减去 A 乘 W", "W 加上 B 加 A"],
+          "answer": 0,
+          "explain": "W' = W + BA：原权重冻结，用两个小矩阵的乘积近似权重更新 ΔW。"
+        },
+        {
+          "q": "B 矩阵零初始化的目的是？",
+          "options": ["起点等于原模型", "节省存储的空间", "让梯度全部为零", "跳过反向的传播"],
+          "answer": 0,
+          "explain": "BA=0 → 修改量为零 → 初始行为与预训练模型完全一致（书实测准确率不变）。"
+        },
+        {
+          "q": "秩 r 变大会怎样？",
+          "options": ["可训练参数变多", "训练完全失败", "推理必然更慢", "alpha 自动减半"],
+          "answer": 0,
+          "explain": "r 决定 A、B 的内部维度：表达力 ↑、参数量 ↑，是适应力与效率的旋钮。"
+        },
+        {
+          "q": "LoRA 在什么场景训练更快？",
+          "options": ["模型很大的时候", "模型很小的时候", "数据很少的时候", "词表很大的时候"],
+          "answer": 0,
+          "explain": "大模型反向传播昂贵，少训参数节省更多；小模型上反而因额外前向计算变慢。"
+        },
+        {
+          "q": "部署时合并 BA 进 W 的好处是？",
+          "options": ["推理零额外开销", "准确率大幅提升", "显存占用翻倍增长", "词表大小自动扩大"],
+          "answer": 0,
+          "explain": "合并后就是普通权重矩阵——LoRA 的灵活只在训练期，推理可以完全无感。"
+        },
+        {
+          "q": "书的实验里 LoRA 微调后测试准确率约为？",
+          "options": ["约百分之九十八", "约百分之五十", "约百分之七十", "约百分之三十"],
+          "answer": 0,
+          "explain": "用 2% 的参数达到与全量微调相当（约 98% vs 97.5%）——效率微调的威力。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利 · 也是全课程的胜利</b>：16 课走完——分词、注意力、架构、预训练、解码、两种微调、训练技巧、LoRA。你已经具备：从零手写 GPT 的能力 + 面试 LLM 岗位的核心知识 + 继续深入（RLHF/DPO、多模态、推理优化）的完整地图。🎓</p>
+
+  <div class="next-lesson">
+    <strong>结课之后 · 继续之路</strong><br>
+    ① 重跑官方 notebooks（ch04→ch07 全链路亲手过一遍）；② 书 GitHub 的 bonus 目录（偏好微调 DPO、更大训练集）；③ 读论文：Attention Is All You Need（1706.03762）→ GPT-2/3 报告 → LoRA（2106.09685）→ DPO（2305.18290）。遇到问题随时回课堂问我。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    建议的收官动作：合上所有材料，在白纸上默写 GPT 的完整数据流（token ID → 嵌入+位置 → 12×Block → LN → out_head → 温度/top-k → 新 token）。能一气呵成，这门课就真正属于你了。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 16 课（完）· 主教材附录 E · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/appendix-E" target="_blank">appendix-E</a> · 原始论文 <a href="https://arxiv.org/abs/2106.09685" target="_blank">LoRA (arXiv:2106.09685)</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

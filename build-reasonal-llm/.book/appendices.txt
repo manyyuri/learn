@@ -1,0 +1,3940 @@
+<<<page 397>>>
+
+Appendix A. References
+and further reading
+A.1 Chapter 1: Understanding reasoning models
+A.1.1 References
+The announcement article of OpenAI's o1 model, which is regarded as the first LLM-
+based reasoning model:
+Introducing OpenAI o1-preview, https://openai. com/index/ introducing- 
+openai-o1-preview/    
+DeepSeek-R1 is the first open-source reasoning model that was accompanied by a
+comprehensive technical report, which was the first to show that reasoning emerges from
+reinforcement learning with verifiable rewards (a topic covered in more detail in chapter 5):
+DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via
+Reinforcement Learning, 
+https://arxiv. org/abs/2501. 12948    
+OpenAI CEO’s comment on the reasoning ("chain-of-thought") capabilities of future models:
+"[...] We will next ship GPT-4.5, the model we called Orion internally, as
+our last non-chain-of-thought model. [...]", https://x. com/sama/ 
+status/1889755723078443244    
+A research paper by AI researchers at Apple finding that reasoning models are
+sophisticated (but very capable) pattern matchers:
+393
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 398>>>
+
+The Illusion of Thinking: Understanding the Strengths and Limitations of
+Reasoning Models via the Lens of Problem Complexity,
+https://machinelearning. apple.com/ research/ illusion- of-thinking    
+An in-depth book and guide on implementing and training large language models step-by-
+step:
+Build a Large Language Model (From Scratch),http://mng. bz/orYv    
+A.1.2 Further Reading
+An introduction to how DeepSeek-R1 works, providing insights into the foundations of
+reasoning in LLMs:
+Understanding Reasoning LLMs, https://magazine. sebastianraschka. 
+com/p/understanding- reasoning- llms    
+A.2 Chapter 2: Generating text with a pre-trained LLM
+A.2.1 References
+Official installation page for the uv Python package and project manager:
+Installing uv, https://docs. astral.sh/ uv/getting- started/installation/    
+User-friendly and popular cloud compute platforms with GPU support:
+Lightning AI, https://lightning. ai/    
+Google Colab, https://colab. research. google.com/    
+Qwen3 resources with additional benchmark performance and comparison to other models:
+Blog post, https://qwenlm. github.io/ blog/qwen3/    
+Technical report, https://arxiv. org/abs/2505. 09388    
+Readers curious about KV cache sizes for different sequence lengths can find a handy
+calculator app here:
+KV cache size calculator, https://lmcache. ai/kv_cache_ calculator. html    
+A.2.2 Further Reading
+A PyTorch tutorial for readers who are new to PyTorch or would like a refresher:
+PyTorch in One Hour: From Tensors to Training Neural Networks on
+Multiple GPUs tutorial, https://sebastianraschka. com/teaching/ pytorch-1h    
+394
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 399>>>
+
+Additional resources on tokenization:
+Build a Large Language Model (from Scratch) chapter 2, https://mng. 
+bz/M96o    
+Implementing A Byte Pair Encoding (BPE) Tokenizer From Scratch,
+https://sebastianraschka. com/blog/ 2025/bpe- from-scratch. html    
+For readers interested in a more in-depth PyTorch coverage (optional), I can recommend
+the following two books:
+Deep Learning with PyTorch, https://www. manning.com/ books/deep- 
+learning- with-pytorch- second-edition    
+Machine Learning with PyTorch and Scikit-Learn, https://www. 
+amazon.com/ Machine-Learning- PyTorch-Scikit- Learn-learning/ 
+dp/1801819319/    
+A.3 Chapter 3: Evaluating reasoning models
+A.3.1 References
+The MATH-500 dataset originated from the MATH dataset (with 12,500 problems across
+algebra, geometry, probability, number theory, and more) that was introduced in the
+following paper:
+Measuring Mathematical Problem Solving With the MATH Dataset,
+https://arxiv. org/abs/2103. 03874    
+The MATH-500 split (created from the original MATH dataset) was proposed in the following
+paper:
+Let's Verify Step by Step, https://arxiv. org/abs/2305. 20050    
+A.3.2 Further Reading
+Readers who are interested in learning more about SymPy, Python library for math and
+symbolic computation (not required for this book), can learn about it in this official tutorial:
+SymPy introductory tutorial, https://docs. sympy.org/ latest/tutorials/ intro-
+tutorial/ index.html    
+An example of a system (here, a fine-tuned LLM) to also evaluate intermediate reasoning
+steps:
+Evaluating Mathematical Reasoning Beyond Accuracy, https://arxiv. 
+org/pdf/2404. 05692    
+395
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 400>>>
+
+A large-scale dataset containing 800,000 step-level correctness labels for model-generated
+solutions to problems from the MATH dataset:
+Let's Verify Step by Step, https://arxiv. org/abs/2305. 20050    
+An article describing the rising cost of LLM evaluation, finding that evaluating reasoning
+models such as o1 on (seven) popular benchmarks costs approximately $1500:
+The rise of AI "reasoning" models is making benchmarking more
+expensive, 
+https://techcrunch. com/2025/ 04/10/the- rise-of-ai- reasoning- 
+models-is- making-benchmarking-more-expensive/    
+A comprehensive 2025 survey on LLM benchmarks:
+A Survey on Large Language Model Benchmarks, https://arxiv. 
+org/abs/2508. 15361    
+Instead of only relying on deterministic and symbolic verifiers, a recent research project
+highlighted that small reasoning models themselves can be used successfully as verifiers for
+other reasoning models:
+xVerify: Efficient Answer Verifier for Reasoning Model Evaluations,
+https://arxiv. org/abs/2504. 10481    
+A.4 Chapter 4: Improving reasoning with inference-time scaling
+A.4.1 References
+The following paper that formally described chain-of-thought prompting. Note that the
+paper suggested "Let's think step by step" as a prompt modification. However, in my
+experiments, I found that "Explain step by step" performs better when using the Qwen3
+base model, which is why we use the latter in chapter 4.
+Large Language Models are Zero-Shot Reasoners, https://arxiv. 
+org/abs/2205. 11916    
+A description of self-consistency sampling with additional comparison studies:
+Self-Consistency Improves Chain-of-Thought Reasoning in Language
+Models, https://arxiv. org/abs/2203. 11171    
+A.4.2 Further Reading
+An overview and discussion of additional inference scaling methods:
+The State of LLM Reasoning Model Inference, https://magazine. 
+sebastianraschka. com/p/state- of-llm-reasoning- and-inference- scaling    
+396
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 401>>>
+
+A.5 Chapter 5: Inference-time scaling via self-refinement
+A.5.1 References
+Google keeps the methods behind their proprietary Gemini 3 model a secret, but based
+on a recent announcement, we can speculate that it uses inference scaling techniques
+similar to self-consistency or Best-of-N: "We’re pushing the boundaries of intelligence even
+further with Gemini 3 Deep Think. This mode meaningfully improves reasoning capabilities
+by exploring many hypotheses simultaneously to solve problems."
+Public announcement by Google DeepMind, which develops Gemini,
+https://x. com/GoogleDeepMind/ status/1996658401233842624? s=20    
+The DeepSeekMath-V2 paper showed that self-consistency scaling can noticeably improve
+the answer accuracy, and combining self-consistency with their version of self-refinement
+(Best@32 in figure 2), the model achieved gold-level performance in several math
+competitions:
+DeepSeekMath-V2: Towards Self-Verifiable Mathematical Reasoning,
+https://arxiv. org/abs/2511. 22570v1    
+Instead of using a majority vote in self-consistency, we can use a scoring function to rank
+the different answers and select the best one. This approach is also known as Best-of-N.
+However, if applicable, majority voting often tends to give better results:
+Think Deep, Think Fast: Investigating Efficiency of Verifier-free Inference-
+time-scaling Methods, 
+https://arxiv. org/abs/2504. 14047    
+A.5.2 Further Reading
+A short article explaining the difference between probabilities and likelihood:
+What is the difference between likelihood and probability?,
+https://sebastianraschka. com/faq/docs/ probability- vs-likelihood. html    
+A.6 Chapter 6: Training reasoning models with reinforcement
+learning
+A.6.1 References
+The InstructGPT paper demonstrated the effectiveness of RLHF and was instrumental in
+popularizing RLHF as a standard alignment and fine-tuning approach for LLMs:
+Training language models to follow instructions with human feedback,
+https://arxiv. org/abs/2203. 02155    
+The DeepSeekMath paper that introduced the GRPO algorithm
+397
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 402>>>
+
+DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open
+Language Models, https://arxiv. org/abs/2402.03300    
+The DeepSeek-R1 paper showed that strong reasoning behavior can emerge in LLMs
+through reinforcement learning alone (via RLVR with GRPO). This was most clearly shown in
+the R1-Zero variant. However, combining this approach with a multi-stage training pipeline
+yields an even better reasoning model:
+DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via
+Reinforcement Learning, 
+https://arxiv. org/abs/2501. 12948    
+A.6.2 Further Reading
+A comprehensive walkthrough of the DeepSeek-R1 training pipeline involving RLVR:
+Understanding Reasoning LLMs: Methods and Strategies for Building and
+Refining Reasoning Models, https://magazine. sebastianraschka. 
+com/p/understanding- reasoning- llms    
+A comparison of GRPO and PPO for reinforcement learning in the context of LLMs:
+The State of Reinforcement Learning for LLM Reasoning: Understanding
+GRPO and New Insights from Reasoning Model Papers, https://magazine. 
+sebastianraschka. com/p/the- state-of- llm-reasoning- model-training    
+A.7 Chapter 7: Improving GRPO for reinforcement learning
+A.7.1 References
+The original PPO paper that introduced clipped policy ratios, which we also use here to
+stabilize GRPO:
+Proximal Policy Optimization Algorithms, https://arxiv. org/abs/1707. 
+06347    
+Additional papers that recommend improvements to the GRPO algorithm:
+DAPO: An Open-Source LLM Reinforcement Learning System at Scale,
+https://arxiv. org/abs/2503. 14476    
+Understanding R1-Zero-Like Training: A Critical Perspective (Dr. GRPO),
+https://arxiv. org/abs/2503. 20783    
+Your Efficient RL Framework Secretly Brings You Off-Policy RL Training
+(VERL), https://fengyao. notion.site/ off-policy- rl    
+DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models,
+https://arxiv. org/abs/2512. 02556    
+GDPO: Group reward-Decoupled Normalization Policy Optimization for
+Multi-reward RL Optimization, https://arxiv. org/abs/2601. 05242    
+398
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 403>>>
+
+Group Sequence Policy Optimization (GSPO), https://arxiv. org/abs/2507. 
+18071    
+MiniMax-M1: Scaling Test-Time Compute Efficiently with Lightning
+Attention (CISPO), https://arxiv. org/abs/2506. 13585    
+A.7.2 Further Reading
+A comparison between PPO (the original algorithm used for RLHF) and GRPO:
+The State of Reinforcement Learning for LLM Reasoning,
+https://magazine. sebastianraschka.com/p/the- state-of- llm-reasoning- 
+model-training    
+A good technical deep dive that discusses different GRPO improvements:
+GRPO++: Tricks for Making RL Actually Work, https://cameronrwolfe. 
+substack. com/p/grpo- tricks    
+A.8 Chapter 8: Distilling Reasoning Models for Efficient Reasoning
+A.8.1 References
+The original knowledge-distillation paper that popularized the combination of hard and
+soft distillation objectives:
+Distilling the Knowledge in a Neural Network, https://arxiv. org/abs/1503. 
+02531    
+The DeepSeek-R1 paper that described the reasoning-distillation recipe, which motivated
+this chapter, where a large teacher model generates reasoning traces that are then used to
+train smaller student models:
+DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via
+Reinforcement Learning, 
+https://arxiv. org/abs/2501. 12948    
+A paper on distilling large language models that reported strong results for carefully
+designed soft-distillation objectives:
+MiniLLM: Knowledge Distillation of Large Language Models, https://arxiv. 
+org/abs/2306. 08543    
+A.8.2 Further Reading
+More details on supervised fine-tuning (the technique in hard distillation) and masking
+when working with batches of training examples
+399
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 404>>>
+
+Build A Large Language Model (From Scratch) chapter 7, https://www. 
+manning.com/ books/build- a-large-language- model-from- scratch    
+A practical walkthrough of reasoning-model training pipelines, including distillation and
+RLVR:
+Understanding Reasoning LLMs: Methods and Strategies for Building and
+Refining Reasoning Models, 
+https://magazine. sebastianraschka. 
+com/p/understanding- reasoning- llms    
+A.9 Appendix F: Common approaches to LLM evaluation
+A.9.1 References
+The paper that introduced the popular multiple-choice MMLU dataset:
+Measuring Massive Multitask Language Understanding, https://arxiv. 
+org/abs/2009. 03300    
+A detailed description of the Elo rating system:
+Elo rating system, https://en. wikipedia. org/wiki/ Elo_rating_ system    
+The Chatbot Arena paper describing the original methodology behind the popular LLM
+leaderboard:
+Chatbot Arena: An Open Platform for Evaluating LLMs by Human
+Preference, 
+https://arxiv. org/abs/2403. 04132    
+A.9.2 Further Reading
+A paper discussing the problems with leaderboards such as LM Arena:
+The Leaderboard Illusion, http://arxiv. org/abs/2504. 20879    
+An article by the author describing gpt-oss in more detail:
+From GPT-2 to gpt-oss: Analyzing the Architectural Advances,
+https://magazine. sebastianraschka.com/p/from- gpt-2-to- gpt-oss-
+analyzing- the    
+A survey of different LLM judge approaches:
+A Survey on LLM-as-a-Judge, https://arxiv. org/abs/2411. 15594    
+Example of a small LLM fine-tuned to act as a judge:
+400
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 405>>>
+
+PHUDGE: Phi-3 as Scalable Judge, https://arxiv. org/abs/2405. 08029    
+401
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 406>>>
+
+Appendix B. Exercise solutions
+The complete code examples for the exercise solutions can be found in the supplementary
+GitHub repository at https://github. com/rasbt/ reasoning- from-scratch.
+B.1 Chapter 2
+EXERCISE 2.1: ENCODING UNKNOWN WORDS
+We can use a prompt similar to "Hello, Ardwarklethyrx. Haus und Garten.", which
+contains a made-up word ("Ardwarklethyrx" ) and three words in a non-English language
+(German):
+The output is:
+"Haus und Garten":
+prompt = "Hello, Ardwarklethyrx. Haus und Garten."
+input_token_ids_list = tokenizer.encode(prompt)
+for i in input_token_ids_list:
+print(f"{[i]} --> {tokenizer.decode([i])}")
+402
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 407>>>
+
+As we can see, unknown words are broken into smaller pieces of subwords or even single
+tokens; this allows the tokenizer and LLM to handle any input.
+German words are not broken down into characters or even subwords here, suggesting
+that the tokenizer has seen German texts during training. This also suggests that the LLM
+was likely trained on German texts, too, and should be able to handle at least certain non-
+English languages well.
+EXERCISE 2.2: RERUN CODE ON NON-CPU DEVICES
+We can simply delete the line device = torch.device("cpu")  in section 2.5, and then
+rerun the rest of the code in chapter 2 as is. Reference numbers for the hardware I tried
+the code on are provided in table 2.1 at the end of chapter 2.
+B.2 Chapter 3
+EXERCISE 3.1: ADDING MORE TEST CASES
+There is an endless number of different test cases we may add. Below is a selection of
+some interesting ones:
+[9707] --> Hello
+[11] --> ,
+[1644] -->  Ar
+[29406] --> dw
+[838] --> ark
+[273] --> le
+[339] --> th
+[10920] --> yr
+[87] --> x
+[13] --> .
+[47375] -->  Haus
+[2030] -->  und
+[93912] -->  Garten
+[13] --> .
+403
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 408>>>
+
+The output is:
+As we can see, the tests pass in all cases except for check_20, which swaps the regular
+sign with a Unicode version of a minus sign that looks indistinguishable to the human eye
+(depending on which font or editor we use). We could fix this test case by adding one of the
+following lines anywhere to the normalize_text function:
+or
+Another interesting test is the following one:
+#A Different bracket types
+#B Scientific notation
+#C Algebraic simplification with caret exponent
+#D Unicode minus (U+2212) vs ASCII hyphen-minus
+from reasoning_from_scratch.ch03 import (
+run_demos_table
+)
+more_tests = [
+("check_17", "[1, 2]", "(1, 2)", True),  #A
+("check_18", "1e-3", "0.001", True),  #B
+("check_19", "(-3)^2", "9", True),  #C
+("check_20", "−1", "-1", True),  #D
+]
+run_demos_table(more_tests)
+Test     | Expect | Got   | Status
+check_17 | True   | True  | PASS
+check_18 | True   | True  | PASS
+check_19 | True   | True  | PASS
+check_20 | True   | False | FAIL
+text = text.replace("−", "-")
+text = text.replace("\u2212", "-")
+extra_tests_1 = [
+("check_21", "Text around answer 3.", "3", True)
+]
+404
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 409>>>
+
+We can run it via the following code:
+However, it fails the test:
+While it may seem that our code cannot handle such text-containing cases, this is actually a
+poorly designed test. In practice, the run_demos_table function is intended specifically to
+test the grade_answer function; nothing more, nothing less.
+The grade_answer function would never receive the entire answer in this text form,
+since the answer would have been extracted from the text before being passed to it. For
+instance, if we want to test text answers, we need to call the test as follows:
+As we can see based on the output, it now passes the test:
+EXERCISE 3.2: CALCULATING THE AVERAGE RESPONSE LENGTH
+There are two options to calculate the average response length. The first option is to modify
+the evaluate_math500_stream function (listing 3.13 in chapter 3) by adding the following
+lines:
+run_demos_table(extra_tests_1)
+Test     | Expect | Got   | Status
+check_21 | True   | False | FAIL  
+Passed 0/1
+from reasoning_from_scratch.ch03 import (
+extract_final_candidate
+)
+extra_tests_2 = [
+("check_21",
+extract_final_candidate("Text around answer 3."),
+"3", True)
+]
+run_demos_table(extra_tests_2)
+Test     | Expect | Got  | Status
+check_21 | True   | True | PASS  
+Passed 1/1
+405
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 410>>>
+
+Alternatively, the second option is to calculate the response lengths from the .jsonl files
+that were created when we ran the evaluate_math500_stream function in the main
+chapter. This way, we avoid having to rerun the evaluation.
+First, we load the .jsonl file as follows:
+Let's print the dictionary keys to get a better idea of how the results dataset is structured:
+# ...
+# below `num_correct = 0`
+total_len = 0
+# ...
+# inside for i, row in enumerate(math_data, start=1):
+# anywhere below `gen_text = ...`
+total_len += len(tokenizer.encode(gen_text))
+# ...
+# anywhere at the bottom before the return statement
+avg_len = total_len / num_examples
+print(f"Average length: {avg_len:.2f} tokens")
+#A You may need to adjust this path
+import json
+from pathlib import Path
+WHICH_MODEL = "base"
+dev_name = "mps"
+local_path = Path(f"math500-{dev_name}.jsonl")  #A
+if not local_path.exists():
+raise FileNotFoundError(
+f"{local_path} not found. Run ch03_main.ipynb to create it."
+)
+results = []
+with open(local_path, "r") as f:
+for line in f:
+if line.strip():
+results.append(json.loads(line))
+print("Number of entries:", len(results))
+406
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 411>>>
+
+This prints:
+Note that each entry has multiple keys, however, we are only interested in the
+"generated_text" key, which contains the model's full answer. Next, we need to load the
+tokenizer so that we can tokenize the answer text before we can calculate the number of
+tokens. This is similar to the code we used in listing 3.1 in chapter 3:
+Then, we can calculate the average length as follows, which is similar to how we could have
+modified the evaluate_math500_stream function:
+print(results[0].keys())
+dict_keys(['index', 'problem', 'gtruth_answer', 'generated_text', 
+'extracted', 'correct'])
+from reasoning_from_scratch.qwen3 import (
+download_qwen3_small,
+Qwen3Tokenizer
+)
+if WHICH_MODEL == "base":
+download_qwen3_small(
+kind="base", tokenizer_only=True, out_dir="qwen3"
+)
+tokenizer_path = Path("qwen3") / "tokenizer-base.json"
+tokenizer = Qwen3Tokenizer(tokenizer_file_path=tokenizer_path)
+elif WHICH_MODEL == "reasoning":
+download_qwen3_small(
+kind="reasoning", tokenizer_only=True, out_dir="qwen3"
+)
+tokenizer_path = Path("qwen3") / "tokenizer-reasoning.json"
+tokenizer = Qwen3Tokenizer(
+tokenizer_file_path=tokenizer_path,
+apply_chat_template=True,
+add_generation_prompt=True,
+add_thinking=True,
+)
+407
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 412>>>
+
+The resulting average length is as follows:
+Table B.1 lists the average lengths for the different models and subsets.
+Table B.1 Average number of tokens on MATH-500
+Model Device Average
+length
+MATH-500
+size
+Base CPU 97.30 10
+Base CUDA 96.74 500
+Reasoning CPU 891.80 10
+Reasoning CUDA 1361.21 500
+As we can see based on the results in table B.1, and as expected, the reasoning model
+generates much longer responses (in this case, approximately 10-times longer).
+EXERCISE 3.3: EXTENDING OR CHANGING THE EVALUATION DATASET
+To evaluate the model on a larger dataset, we can simply change the math_data[:10] to a
+different slice or larger number (up to 500) in the following function call:
+total_len = 0
+for item in results:
+num_tokens = len(tokenizer.encode(item["generated_text"]))
+total_len += num_tokens
+avg_len = total_len / len(results)
+print(f"Average length: {avg_len:.2f} tokens")
+Average length: 98.00 tokens
+num_correct, num_examples, acc = evaluate_math500_stream(
+model, tokenizer, device, 
+math_data=math_data[:10],
+max_new_tokens=2048,
+verbose=False
+)
+408
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 413>>>
+
+Table B.2 below shows the accuracy values for different dataset sizes. (Since the MATH-500
+test set is already shuffled, no additional shuffling was applied.)
+Table B.2 Accuracies for different MATH-500 dataset sizes
+Model Device Accuracy MATH-500
+size
+Base CUDA 30.0% 10
+Base CUDA 34.0% 50
+Base CUDA 27.0% 100
+Base CUDA 15.3% 500
+Reasoning CUDA 90.0% 10
+Reasoning CUDA 58.0% 50
+Reasoning CUDA 56.0% 100
+Reasoning CUDA 48.2% 500
+As we can see based on the results in table B.2, the first 10 examples are not very
+representative of the MATH-500 performance evaluated on the whole 500 examples.
+In addition, we can create an entirely new dataset in a similar style to MATH-500. For
+example, a dataset in MATH-500 style is included in this repository; we can use it in the
+main chapter by changing the filename from math500_test.json to
+math_new50_exercise.json (this dataset is included in this book's GitHub repository at
+https://github. com/rasbt/ reasoning- from-scratch/ tree/main/ ch03/01_main- chapter-code).
+The performance of the models is as follows:
+base: 36.0% (18/50)    
+reasoning: 80.0% (40/50)    
+Accuracy is similar for the base model and higher for the reasoning model compared to the
+50-example subset of the MATH-500 test set (table B.2). This indicates that, despite the
+possibility of overlap with Qwen3’s training data, the model generalizes well to new math
+questions and does not show signs of extensive overfitting to the original MATH-500 data.
+EXERCISE 3.4: EXPERIMENTING WITH DIFFERENT PROMPT TEMPLATES
+We could use the alternative prompt similar to the one suggested in the chapter, which
+modifies the prompt to use the word "problem" instead of "question":
+409
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 414>>>
+
+Using this prompt improves the performance of the base model, on the 500 examples, from
+15.3% to 31.2%. Also, it improves the performance of the reasoning model from 48.2% to
+50.0%
+From these observations, we may conclude that the base model is much more sensitive
+to the prompt format (likely due to memorizing some prompt-formatted MATH-500
+examples from the training set) than the reasoning model; the latter seems largely
+unaffected.
+B.3 Chapter 4
+EXERCISE 4.1: USE CHAIN-OF-THOUGHT PROMPTING ON MATH-500
+The modification only requires adding a prompt suffix such as "\n\nExplain step by
+step." after applying the prompt template. There is only a very small portion of code that
+needs to be updated in the MATH-500 evaluation function from chapter 3, as shown below:
+The improvements are shown in row 3 in table 4.1, which can be found in section 4.6 in
+chapter 4.
+def render_prompt(prompt):
+template = (
+"You are a helpful math assistant.\n"
+"Solve the problem and write the final "
+"result on a new line as:\n"
+"\\boxed{ANSWER}\n\n"
+f"Problem:\n{prompt}\n\nAnswer:"
+)
+return template
+def evaluate_math500_stream(...):
+# ...
+for i, row in enumerate(math_data, start=1):
+prompt = render_prompt(row["problem"])
+prompt += "\n\nExplain step by step."  # NEW
+gen_text = generate_text_stream_concat(
+model, tokenizer, prompt, device,
+max_new_tokens=max_new_tokens,
+verbose=verbose,
+)
+# ...
+410
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 415>>>
+
+EXERCISE 4.2: USE TEMPERATURE SCALING AND TOP-P FILTERING ON MATH-500
+Here, we replace the generate_text_stream_concat function with
+generate_text_stream_concat_flex and pass in generate_text_top_p_stream_cache as
+its generation function. The updated MATH-500 evaluation function from chapter 3 is shown
+below, and the changes are marked with comments labeled # NEW.
+The difference between this modified function and the baseline from chapter 3 can be seen
+in rows 1 and 4 in table 4.1, which can be found in section 4.6 in chapter 4.
+def evaluate_math500_stream(
+model,
+tokenizer,
+device,
+math_data,
+out_path=None,
+max_new_tokens=512,
+verbose=False,
+temperature=1.0,  # NEW
+top_p=1.0,        # NEW
+):
+# ...
+with open(out_path, "w", encoding="utf-8") as f:
+for i, row in enumerate(math_data, start=1):
+prompt = render_prompt(row["problem"])
+gen_text = generate_text_stream_concat_flex( # NEW
+model, tokenizer, prompt, device,
+max_new_tokens=max_new_tokens,
+verbose=verbose,
+generate_func=generate_text_top_p_stream_cache,  # NEW
+temperature=temperature,                         # NEW
+top_p=top_p                                      # NEW
+)
+# ...
+411
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 416>>>
+
+EXERCISE 4.3: USE SELF-CONSISTENCY SAMPLING ON MATH-500
+Starting from the evaluate_math500_stream function in chapter 3, the first modification is
+to replace the line gen_text = generate_text_stream_concat(...)  with a call to
+results = self_consistency_vote(...) from chapter 4. The second modification adds a
+simple tie-breaking rule that selects the first occurrence of the most frequent answer. For
+instance, if the sampled results are 1, 3, 5, 3, 5, the function would return 3 because it is
+the earliest member of the most frequent group.
+Since the most frequent answers are stored in results["majority_winners"], one
+straightforward way to break ties is to take the first element of this list, that is,
+results["majority_winners"][0].
+Those changes are illustrated in the code excerpts below:
+412
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 417>>>
+
+def evaluate_math500_stream(
+model,
+tokenizer,
+device,
+math_data,
+out_path=None,
+max_new_tokens=2048,
+verbose=False,
+prompt_suffix="",    # NEW
+temperature=1.0,     # NEW
+top_p=1.0,           # NEW
+seed=None,           # NEW
+num_samples=10,      # NEW
+):
+if out_path is None:
+dev_name = str(device).replace(":", "-")
+out_path = Path(f"math500-{dev_name}.jsonl")
+num_examples = len(math_data)
+num_correct = 0
+start_time = time.time()
+with open(out_path, "w", encoding="utf-8") as f:
+for i, row in enumerate(math_data, start=1):
+prompt = render_prompt(row["problem"])
+##############################################################
+# NEW
+prompt += prompt_suffix
+results = self_consistency_vote(
+model=model,
+tokenizer=tokenizer,
+prompt=prompt,
+device=device,
+num_samples=num_samples,
+temperature=temperature,
+top_p=top_p,
+max_new_tokens=max_new_tokens,
+show_progress=False,
+show_long_answer=False,
+seed=seed,
+)
+413
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 418>>>
+
+The performance improvements when using self-consistency sampling are summarized and
+discussed in table 4.1 in chapter 4 (rows 5-7 and rows 9-12), which can be found in section
+4.6 of chapter 4.
+EXERCISE 4.4: EARLY STOPPING IN SELF-CONSISTENCY SAMPLING
+The early stopping check can be implemented by adding a few lines of code that check
+whether the given answer is already counted multiple times, or, more specifically, if the
+given answer count is greater than num_samples / 2:
+The excerpt of the modified self_consistency_vote function below illustrates more
+specifically where to insert this code:
+# resolve ties
+if results["final_answer"] is None:
+extracted = results["majority_winners"][0]
+else:
+extracted = results["final_answer"]
+# extracted = extract_final_candidate(
+#     gen_text
+# )
+# Optionally, get long answer
+if extracted is not None:
+for idx, s in enumerate(results["short_answers"]):
+if s == extracted:
+long_answer = results["full_answers"][idx]
+break
+gen_text = long_answer
+##############################################################
+is_correct = grade_answer(
+extracted, row["answer"]
+)
+num_correct += int(is_correct)
+# ...
+if early_stop and counts[short] > num_samples / 2:
+majority_winners = [short]
+final_answer = short
+break
+414
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 419>>>
+
+def self_consistency_vote(
+# ...
+early_stop=True,   # NEW
+):
+# ...
+if show_progress:
+print(f"[Sample {i+1}/{num_samples}] → {short!r}")
+#########################################################
+# NEW
+# Early stop if one answer already meets >= 50% majority
+if early_stop and counts[short] > num_samples / 2:
+majority_winners = [short]
+final_answer = short
+break
+#########################################################
+if final_answer is None:
+mc = counts.most_common()
+if mc:
+top_freq = mc[0][1]
+majority_winners = [s for s, f in mc if f == top_freq]
+final_answer = mc[0][0] if len(majority_winners) == 1 else None
+return {
+"full_answers": full_answers,
+"short_answers": short_answers,
+"counts": dict(counts),
+"groups": groups,
+"majority_winners": majority_winners,
+"final_answer": final_answer,
+}
+415
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 420>>>
+
+B.4 Chapter 5
+EXERCISE 5.1: USING THE HEURISTIC SCORER AS A TIE-BREAKER IN SELF-
+CONSISTENCY
+There are many ways to implement this. Perhaps the easiest approach is to handle it
+outside the self-consistency function and work directly with the returned dictionary, similar
+to what we did in exercise 4.4 when we implemented the tie-breaking logic directly inside
+the evaluate_math500_stream function. The relevant lines are shown below:
+The results are shown in table B.3.
+# ...
+from reasoning_from_scratch.ch05 import heuristic_score
+def evaluate_math500_stream(
+#...
+# ...
+results = self_consistency_vote(...)
+# Majority vote winner available
+if results["final_answer"] is not None:
+extracted = results["final_answer"]
+### NEW: Break tie with heuristic_score
+else:
+best = None
+best_score = float("-inf")
+for cand in results["majority_winners"]:
+scores = [
+heuristic_score(results["full_answers"][idx],   
+prompt=prompt)
+for idx in results["groups"][cand]
+]
+score = max(scores)
+if score > best_score:
+best_score = score
+best = cand
+extracted = best
+# ...
+# ...
+return num_correct, num_examples, acc
+416
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 421>>>
+
+Table B.3 MATH-500 self-consistency score with different tie-breaking
+ Method Model Accuracy Time
+1 Baseline with chain-of-thought
+prompting
+Base 33.4% 129.2
+min
+2 Self-consistency (n=3) Base 43.2% 328.2
+min
+3 Self-consistency (n=3) + heuristic Base 43.4% 326.5
+min
+4 Self-consistency (n=3) + avg. logprob Base 44.8% 327.7
+min
+The accuracy values and runtimes shown in the table were computed on all 500 samples in
+the MATH-500 test set using a "cuda" GPU (DGX Spark).
+Row 1 in table B.3 is the baseline from chapter 4 without self-consistency. Row 2 doesn't
+use a scorer for tie-breaking, so if there is a tie among the answers, it chooses the answer
+with the first appearance. Using a heuristic scorer (row 3) as tie-breaker results in a slight
+improvement. And the best (but also minimal) improvement is achieved with the logprob
+scorer as tie-breaker (row 4).
+EXERCISE 5.2: USING THE HEURISTIC SCORER IN A BEST-OF-N SETUP
+Best-of-N is similar to self-consistency in that we generate multiple answers. However,
+instead of selecting the final answer via a majority vote, we score all generated answers
+using a scoring function, such as heuristic_score, and return the highest-scoring one.
+There are several ways to implement this behavior, but the simplest approach is to use the
+existing self-consistency function from chapter 4 as a template and swap in
+heuristic_score, as shown below:
+417
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 422>>>
+
+# ...
+from reasoning_from_scratch.ch05 import (
+heuristic_score
+)
+def self_consistency_vote( #...):
+full_answers, short_answers = [], []
+counts = Counter()
+groups = {}
+majority_winners, final_answer = [], None
+best_score, best_idx = float("-inf"), None
+for i in range(num_samples):
+if seed is not None:
+torch.manual_seed(seed + i + 1)
+answer = generate_text_stream_concat_flex(
+model=model,
+tokenizer=tokenizer,
+prompt=prompt,
+device=device,
+max_new_tokens=max_new_tokens,
+verbose=show_long_answer,
+generate_func=generate_text_top_p_stream_cache,
+temperature=temperature,
+top_p=top_p,
+)
+short = extract_final_candidate(answer, fallback="number_then_full")
+full_answers.append(answer)
+short_answers.append(short)
+counts[short] += 1
+if short in groups:
+groups[short].append(i)
+else:
+groups[short] = [i]
+score = heuristic_score(answer, prompt=prompt)
+if score > best_score:
+best_score, best_idx = score, i
+418
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 423>>>
+
+Table B.4 MATH-500 Best-of-N scores with heuristic and average logprob scores
+ Method Model Accuracy Time
+1 Baseline with chain-of-thought
+prompting
+Base 33.4% 129.2
+min
+2 Best-of-N (n=3) + heuristic Base 40.6% 327.7
+min
+3 Best-of-N (n=3) + avg. logprob Base 43.2% 330.2
+min
+The accuracy values and runtimes shown in the table were computed on all 500 samples in
+the MATH-500 test set using a "cuda" GPU (DGX Spark).
+EXERCISE 5.3: USING THE LOGPROB SCORER AS A TIE-BREAKER IN SELF-
+CONSISTENCY
+The code is similar to exercise 5.1, except that we swap heuristic_score with
+avg_logprob_answer, as shown below:
+# ...
+# ...
+# from reasoning_from_scratch.ch05 import heuristic_score
+from reasoning_from_scratch.ch05 import avg_logprob_answer
+def evaluate_math500_stream(# ...)
+# ...
+# score = heuristic_score(
+#    candidate_full, prompt=prompt
+# )
+score = avg_logprob_answer(
+model=model,
+tokenizer=tokenizer,
+prompt=prompt,
+answer=candidate_full,
+device=device,
+)
+# ...
+419
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 424>>>
+
+The results were already included in the previous table B.3 (exercise 5.1) in row 4.
+EXERCISE 5.4: USING THE LOGPROB SCORER IN A BEST-OF-N SETUP
+To implement Best-of-N with a logprob scorer, we can use the code from exercise 5.2 and
+swap the heuristic_score with avg_logprob_answer, as shown below:
+The resulting MATH-500 score is shown in table B.4 above (exercise 5.2).
+EXERCISE 5.5: USING THE HEURISTIC SCORE FOR SELF-REFINEMENT
+Using the heuristic_score is actually even simpler than using the logprob score; all we
+need to do is change the following code:
+from reasoning_from_scratch.ch05 import (
+avg_logprob_answer
+)
+# ...
+score = avg_logprob_answer(
+model=model,
+tokenizer=tokenizer,
+prompt=prompt,
+answer=answer,
+device=device
+)
+if score > best_score:
+best_score, best_idx = score, i
+# ...
+420
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 425>>>
+
+The improvements over the baseline in chapter 3 and self-consistency from chapter 4 are
+shown in table 5.1 (rows 4, 5, and 10) in the main chapter.
+from functools import partial
+avg_logprob_score = partial(
+avg_logprob_answer,
+model=model,
+tokenizer=tokenizer,
+device=device
+)
+torch.manual_seed(0)
+results_logprob = self_refinement_loop(
+model=model,
+tokenizer=tokenizer,
+raw_prompt=raw_prompt,
+device=device,
+iterations=2,
+max_response_tokens=2048,
+max_critique_tokens=256,
+score_fn=avg_logprob_score,
+verbose=True,
+temperature=0.7,
+top_p=0.9,
+)
+The updated code is:
+torch.manual_seed(0)
+results_logprob = self_refinement_loop(
+model=model,
+tokenizer=tokenizer,
+raw_prompt=raw_prompt,
+device=device,
+iterations=2,
+max_response_tokens=2048,
+max_critique_tokens=256,
+score_fn=heuristic_score,  # NEW
+verbose=True,
+temperature=0.7,
+top_p=0.9,
+)
+421
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 426>>>
+
+B.5 Chapter 6
+EXERCISE 6.1: ADDING FORMAT-AWARE REWARD SHAPING
+We can assign a partial reward (score 0.5) if no "\boxed{}" answer is found as follows,
+using the fallback="number_then_full" fallback we coded in chapter 3:
+When plugged into the chapter 6 code and trained under the same settings, the partial-
+reward variant achieves lower accuracy (37.8%) than the standard GRPO setup (47.4%),
+despite using a similar number of tokens on average, as shown in table B.5.
+from reasoning_from_scratch.ch03 import (
+extract_final_candidate, grade_answer
+)
+def reward_rlvr(answer_text, ground_truth):
+# 1) Try to extract a boxed answer
+boxed = extract_final_candidate(
+answer_text, fallback=None
+)
+if boxed:
+correct = grade_answer(boxed, ground_truth)
+return 1.0 if correct else 0.0
+# 2) If no boxed answer is found, look for number
+unboxed = extract_final_candidate(
+answer_text, fallback="number_then_full"
+)
+if unboxed:
+correct = grade_answer(unboxed, ground_truth)
+return 0.5 if correct else 0.0
+return 0.0
+422
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 427>>>
+
+Table B.5 MATH-500 accuracies for strict and partial rewards
+ Method Step Max
+tokens
+Num
+rollouts
+Accuracy Average
+tokens
+1 GRPO (chapter 6) 50 512 8 47.4% 586.11
+2 GRPO partial
+rewards (exercise
+6.2)
+50 512 8 37.8% 550.33
+EXERCISE 6.2: ZERO-ADVANTAGE CASES
+If the rewards are all equal (for instance, they are all 0 or all 1), the advantages will all be
+0, because subtracting the mean removes the shared reward value and leaves only zeros,
+which we can demonstrate below:
+This returns tensor([0., 0., 0., 0.]).
+Similarly, if we change the rollout rewards to rollout_rewards = [0., 0., 0., 0.] ,
+we get the same all-zero tensor, tensor([0., 0., 0., 0.]).
+In short, if all rewards in a group are identical, for example all rewards 0 or all rewards
+are 1, then 𝑟𝑖 -𝜇𝑖 = 0 for all i rollouts. As a result, the policy gradient is zero and the model
+parameters are not updated for that prompt.
+This behavior is intentional. If all rollouts are equally bad or equally good, there is no
+relative signal to tell the model which behavior to reinforce or suppress. Intuitively, if the
+model answers all the questions correctly, there is no need to update it. Vice versa, if the
+model answers all questions incorrectly, we don't want to update the model to reinforce this
+behavior.
+B.6 Chapter 7
+EXERCISE 7.1: TESTING THE <THINK> FORMAT REWARD
+The following code checks that the format reward is zero if the think tokens are used
+incorrectly:
+import torch
+rollout_rewards = [0., 0., 0., 0.]
+rewards = torch.tensor(rollout_rewards)
+advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
+print(advantages)
+423
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 428>>>
+
+from pathlib import Path
+import torch
+from reasoning_from_scratch.qwen3 import Qwen3Tokenizer
+from reasoning_from_scratch.qwen3 import download_qwen3_small
+from reasoning_from_scratch.ch07 import reward_format
+download_qwen3_small(
+kind="reasoning", tokenizer_only=True, out_dir="qwen3"
+)
+tokenizer_path = Path("qwen3") / "tokenizer-reasoning.json"
+tokenizer = Qwen3Tokenizer(tokenizer_file_path=tokenizer_path)
+prompt = "Calculate ..."
+def check_case(name, rollout):
+token_ids = tokenizer.encode(prompt + rollout)
+prompt_len = len(tokenizer.encode(prompt))
+reward = reward_format(
+token_ids=torch.tensor(token_ids),
+prompt_len=prompt_len,
+)
+print(f"{name}: {reward}")
+# 1) Correct case
+check_case(
+"Correct order",
+"Let's ... <think> ... </think> ..."
+)
+# 2) Typo in tag
+check_case(
+"Typo in <think>",
+"Let's ... <thnik> ... </think> ..."
+)
+# 3) Reversed order
+check_case(
+"Reversed order",
+"Let's ... </think> ... <think> ..."
+)
+# 4) Missing one tag
+check_case(
+"Missing </think>",
+424
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 429>>>
+
+The output is as follows, indicating that the function requires correct <think>...</think>
+tag use to award a reward of 1.0
+EXERCISE 7.2: MAKING THE FORMAT REWARD CONDITIONAL
+The implementation of the conditional reward is very simple; in the main chapter, we
+discussed implementing the overall reward as follows:
+So, one way to disable the reward if the correctness reward (rlvr_reward) is 0.0 is
+To use it in practice, you can run the 7_6_plus_format_reward.py script, which we used in
+section 7.6 in chapter 7 with the --conditional_reward flag enabled.
+We can download the log file of this run (using similar settings as in section 7.6) and plot
+it as follows:
+"Let's ... <think> ..."
+)
+Correct order: 1.0
+Typo in <think>: 0.0
+Reversed order: 0.0
+Missing </think>: 0.0
+reward = rlvr_reward + format_reward_weight * format_reward
+if conditional_reward:
+format_reward *= rlvr_reward
+reward = rlvr_reward + format_reward_weight * format_reward
+from reasoning_from_scratch.ch07 import download_from_github
+from reasoning_from_scratch.ch07 import plot_grpo_metrics
+download_from_github(
+"ch07/02_logs/7_6_plus_format_reward_conditional_metrics.csv"
+)
+plot_grpo_metrics(
+"7_6_plus_format_reward_conditional_metrics.csv",
+columns=["loss", "reward_avg", "avg_response_len", "eval_acc"],
+)
+425
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 430>>>
+
+Figure B.1 Basic metrics from a GRPO training run with a conditional format reward.
+The plots in figure 7.1 show that the evaluation accuracy and reward average take a big hit,
+but seem to recover.
+Overall, despite this performance crash, this looks more stable than before, and the
+trend indicates that the performance would improve further if we trained longer.
+plot_grpo_metrics(
+"7_6_plus_format_reward_conditional_metrics.csv",
+columns=["reward_avg", "format_reward_avg", "adv_std", "entropy_avg"],
+)
+426
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 431>>>
+
+Figure B.2 Additional metrics from a GRPO training run with a conditional format reward.
+In figure 7.2, we see the average format reward mimicking the average reward graph
+almost perfectly, which is a good sanity check that the conditional logic is working. Also, the
+average format reward shows how much of the total reward is coming from the format term
+on the subset of correct answers.
+As we can see though, since the average format reward graph echoes the average
+reward one, it's mainly a bonus (and it looks like it's always awarded if the model is
+correct; this makes sense, because the trained reasoning model already knows how to use
+<think>...</think> tags correctly (and we can see that it doesn't unlearn this ability).
+The entropy increase is still a bit troubling, though, and could hint towards training
+instabilities that could potentially be addressed by other means (like tighter clipping with
+smaller clip_eps).
+427
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 432>>>
+
+B.7 Chapter 8
+EXERCISE 8.1: TRAINING AND VALIDATION SET LENGTHS
+To calculate the training and validation answer length statistics, you can add the
+following commands at the end of section 8.4.3, following the partitioning:
+and
+To calculate the training and validation answer length statistics, you can add the
+following commands at the end of section 8.4.3, following the partioning:
+As we can see, the average token length (1180 versus 1106) is fairly similar, and the
+datasets should be relatively balanced.
+As a bonus, we can also plot histograms to visualize the distributions:
+compute_length(train_examples)
+# Prints
+# Average: 1180 tokens
+# Shortest: 236 tokens (index 5730)
+# Longest: 2048 tokens (index 1319)
+compute_length(train_examples)
+# Prints
+# Average: 1180 tokens
+# Shortest: 236 tokens (index 5730)
+# Longest: 2048 tokens (index 1319)
+428
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 433>>>
+
+The resulting plot is shown in figure B.3.
+Figure B.3 Distribution of training and validation set lengths.
+There are much fewer validation samples, which is why the validation histogram seems a
+bit jagged, but as we can see, it has a good distribution coverage.
+import matplotlib.pyplot as plt
+train_lengths = [len(ex["token_ids"]) for ex in train_examples]
+val_lengths = [len(ex["token_ids"]) for ex in val_examples]
+# Normalize counts because the validation split is much smaller
+bins = range(0, max(train_lengths + val_lengths) + 64, 64)
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.hist(train_lengths, bins=bins, density=True, alpha=0.6, label="Train")
+ax.hist(val_lengths, bins=bins, density=True, alpha=0.6, label="Validation")
+ax.set_xlabel("Token length")
+ax.set_ylabel("Density")
+ax.legend()
+plt.tight_layout()
+plt.show()
+429
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 434>>>
+
+EXERCISE 8.2: DISTILLING WITHOUT <THINK> TOKENS
+To replicate the runs without <think></think> tokens in the script execution command:
+Then, for the evaluation, we use the base instead of reasoning model:
+The results are shown in table B.6.
+uv run distill.py \
+--data_path deepseek-r1-math-train.json \
+--validation_size 25 \
+--epochs 3 \
+--lr 1e-5 \
+--max_seq_len 2048 \
+--grad_clip 1.0
+uv run evaluate_math500.py \
+--dataset_size 500 \
+--which_model base \
+--max_new_tokens 4096 \
+--checkpoint_path \
+run_11/checkpoints/distill/qwen3-0.6B-distill-step05746-epoch1.pth
+430
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 435>>>
+
+Table B.6 MATH-500 task accuracy with and without think tokens
+ Method Epoch Final val loss MATH-500
+Acc.
+1 Base Qwen3 0.6B (chapter
+3)
+- - 15.2%
+2 Reasoning Qwen3 0.6B
+(chapter 3)
+- - 48.2%
+3 DeepSeek-R1 1 0.5436   
+(0.5404)
+31.8%
+(30.6%)
+4 DeepSeek-R1 2 0.5349   
+(0.5339)
+31.8%
+(32.4%)
+5
+ DeepSeek-R1 3 0.5343   
+(0.5306)
+30.2%
+(33.6%)
+6 Qwen3 235B-A22B 1 0.4043   
+(0.3130)
+44.8%
+(45.0%)
+7 Qwen3 235B-A22B 2 0.3963   
+(0.3087)
+39.4%
+(43.8%)
+8 Qwen3 235B-A22B 3 0.3948 
+  
+(0.3078)
+39.8%
+(44.2%)
+In table B.6, the new results (without think tokens) are shown first, with corresponding
+think-token results (from the main chapter) in parentheses.
+Interestingly, the Qwen3 model has a lower validation loss when <think></think>
+tokens are omitted, but this doesn't translate into better modeling performance.
+As we can see, the omission of <think></think> makes the results slightly worse in
+almost all cases.
+431
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 436>>>
+
+Appendix C. Qwen3
+LLM source code
+While this is a from scratch book, as mentioned in the main chapters, the from scratch part
+refers to the reasoning techniques, not the LLM itself. Implementing an LLM entirely from
+scratch would require a separate book, which is the topic of my Build A Large Language
+Model (From Scratch) book (http://mng. bz/orYv).
+However, for readers interested in seeing the Qwen3 implementation we use in this Build
+A Reasoning Model (From Scratch) book, this appendix lists the source code for the
+Qwen3Model model that I implemented in and that we import from the book's
+reasoning_from_scratch Python package:
+As shown in figure C.1, the Qwen3 architecture is very similar to GPT-2, which is covered in
+my Build A Large Language Model (From Scratch) book. While familiarity with GPT-2 is not
+required for this book, this appendix mentions comparisons to GPT-2 for those who are
+familiar with it. In fact, I wrote the Qwen3 implementation by porting the GPT-2 model
+from my other book piece by piece into the Qwen3 architecture, such that it follows similar
+style conventions to improve readability.
+from reasoning_from_scratch.qwen3 import Qwen3Model, Qwen3Tokenizer
+432
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 437>>>
+
+Figure C.1 Architectural comparison between Qwen3 and GPT-2. Both models process text through
+embedding layers and stacked transformer blocks, but they differ in certain design choices.
+As shown in figure C.1, both Qwen3 (released in 2025) and GPT-2 (released in 2019) are
+very similar overall in that they are both based on the decoder submodule of the original
+transformer architecture. However, some of the design choices have evolved since 2019.
+Note that most of these design choices found in Qwen3 are not unique to Qwen3 but are
+found in many other contemporary LLMs, which I discussed in my The Big LLM Architecture
+Comparison (https://magazine. sebastianraschka. com/p/the- big-llm-architecture- 
+comparison) article.
+For readers new to LLMs who want to understand how these architectures are
+implemented, I recommend starting with GPT-2. Its design is simpler to implement, which
+makes it an easier entry point before exploring more modern variations.
+433
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 438>>>
+
+Since this book does not focus on architecture implementations, the remainder of this
+appendix will cover only a brief overview of Qwen3's code.
+C.1 Root mean square layer normalization (RMSNorm)
+In contrast to GPT-2, which used standard LayerNorm, the newer Qwen3 architecture
+replaces it with root mean square layer normalization (RMSNorm). This is a trend that has
+become increasingly common in recent model architectures.
+RMSNorm fulfills the same core function as LayerNorm: normalizing layer activations to
+stabilize and improve training. However, it simplifies the computation by removing the
+mean-centering step, as shown in figure C.2. This means that activations will still be
+normalized, but they are not centered at 0.
+Figure C.2 Comparison of LayerNorm (used in GPT-2) and RMSNorm (used in Qwen3). LayerNorm (left)
+normalizes activations so that their average value (mean) is exactly zero and their spread (variance) is exactly
+one. RMSNorm (right) instead scales activations based on their root mean square, which does not enforce
+zero mean or unit variance, but still keeps the mean and variance within a reasonable range for stable
+training.
+As we can see in figure C.2, both LayerNorm and RMSNorm scale the layer outputs to be in
+a reasonable range.
+LayerNorm subtracts the mean and divides by the standard deviation such that the layer
+outputs have a zero mean and unit variance (variance of one and standard deviation of
+one), which results in favorable properties, in terms of gradient values, for stable training.
+RMSNorm divides the inputs by the root mean square. This scales activations to a
+comparable magnitude without enforcing zero mean or unit variance. In this particular
+example shown in figure C.2, the mean is 0.77 and the variance is 0.41.
+434
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 439>>>
+
+Both LayerNorm and RMSNorm stabilize activation scales and improve optimization;
+however, RMSNorm is often preferred in large-scale LLMs because it is computationally
+cheaper. Unlike LayerNorm, RMSNorm does not use a bias (shift) term by default, which
+reduces the number of trainable parameters. Moreover, RMSNorm reduces the expensive
+mean and variance computations to a single root-mean-square operation. This reduces the
+number of cross-feature reductions from two to one, which lowers communication overhead
+on GPUs and slightly improves training efficiency.
+Listing C.1 shows what RMSNorm looks like in code.
+Listing C.1 RMSNorm .
+import torch.nn as nn
+class RMSNorm(nn.Module):
+def __init__(
+self,
+emb_dim,
+eps=1e-6,
+bias=False,
+qwen3_compatible=True,
+):
+super().__init__()
+self.eps = eps
+self.qwen3_compatible = qwen3_compatible
+self.scale = nn.Parameter(torch.ones(emb_dim))
+self.shift = nn.Parameter(torch.zeros(emb_dim)) if bias else None
+def forward(self, x):
+input_dtype = x.dtype
+if self.qwen3_compatible:
+x = x.to(torch.float32)
+variance = x.pow(2).mean(dim=-1, keepdim=True)
+norm_x = x * torch.rsqrt(variance + self.eps)
+norm_x = norm_x * self.scale
+if self.shift is not None:
+norm_x = norm_x + self.shift
+return norm_x.to(input_dtype)
+435
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 440>>>
+
+Note that, for brevity, this appendix does not provide detailed code walkthroughs for each
+LLM component. Instead, in section C.6, we will integrate all components into the
+Qwen3Model class, load the pre-trained weights into it, and then use this model to generate
+text in section C.9.
+C.2 Feed forward module
+The feed forward module (a small multi-layer perceptron) is replaced with a gated linear
+unit (GLU) variant, introduced in a 2020 paper ( https://arxiv. org/abs/2002. 05202). In this
+design, the standard two fully connected layers are replaced by three, as shown in figure
+C.3.
+436
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 441>>>
+
+Figure C.3 In GPT-2 (top), the feed forward module consists of two fully connected (linear) layers separated by
+a non-linear activation function. In Qwen3 (bottom), this module is a gated linear unit (GLU) variant, which
+adds a third linear layer (linear layer 3) and multiplies the output of this linear layer 3 elementwise with the
+activated output of linear layer 1.
+Qwen3's feed forward module (figure C.3) can be implemented as shown in listing C.2.
+437
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 442>>>
+
+At first glance, it might seem that the GLU feed forward variant used in Qwen3 should
+outperform the standard feed forward variant in GPT-2, simply because it adds an extra
+linear layer (three instead of two) and therefore appears to have more parameters.
+However, this intuition is misleading. In practice, the fc1 and fc2 layers in the GLU
+variant are each half the width of the fc1 layer in a standard feed forward module. In
+practice, the GLU variant has fewer parameters.
+To illustrate this with a concrete example, suppose the input dimension to the "Linear
+layer 1" in figure C.3 is 1024. This corresponds to cfg["emb_dim"] in listing C.2. The
+output dimension of fc1 is 3,072 ( cfg["hidden_dim"]). Note that these are the actual
+numbers used in the Qwen3 0.6B variant. In this case, we have the following parameter
+counts for the GLU variant in listing C.2:
+fc1: 1024 × 3,072 = 3,145,728    
+fc2: 1024 × 3,072 = 3,145,728    
+fc3: 1024 × 3,072 = 3,145,728    
+Total: 3 × 3,145,728 = 9,437,184 parameters    
+Listing C.2 Qwen3 feed forward module .
+#A The non-linear activation function here is a SiLU function, which will be discussed later
+class FeedForward(nn.Module):
+def __init__(self, cfg):
+super().__init__()
+self.fc1 = nn.Linear(
+cfg["emb_dim"], cfg["hidden_dim"], dtype=cfg["dtype"],
+bias=False
+)
+self.fc2 = nn.Linear(
+cfg["emb_dim"], cfg["hidden_dim"], dtype=cfg["dtype"],
+bias=False
+)
+self.fc3 = nn.Linear(
+cfg["hidden_dim"], cfg["emb_dim"], dtype=cfg["dtype"],
+bias=False
+)
+def forward(self, x):
+x_fc1 = self.fc1(x)
+x_fc2 = self.fc2(x)
+x = nn.functional.silu(x_fc1) * x_fc2  #A
+return self.fc3(x)
+438
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 443>>>
+
+If we assume that fc1 in this GLU variant has half the width as would be typically chosen
+for an fc1 in a standard feed forward module, the parameter counts of the standard feed
+forward module would be as follows:
+fc1: 1024 × 2×3,072 = 6,291,456    
+fc2: 1024 × 2×3,072 = 6,291,456    
+Total: 2 × 6,291,456 = 12,582,912 parameters    
+While GLU variants usually have fewer parameters than regular feed forward modules, they
+perform better. The improvement comes from the additional multiplicative interaction
+introduced by the gating mechanism, activation(x_fc1) * x_fc2 , which increases the
+model's expressivity. This is similar to how deeper, slimmer networks can outperform
+shallower, wider ones, given proper training.
+Before we proceed to the next section, there is one more thing to address. Note that the
+feed forward module shown in figure C.3 contains an element labeled as "Activation
+function, " whereas we used a nn.functional.silu activation as a concrete example in
+listing C.2.
+Historically, activation functions were a hot topic of debate until the deep learning
+community largely converged on the rectified linear unit (ReLU) more than a decade ago.
+ReLU is simple and computationally cheap, but it has a sharp kink at zero. This motivated
+researchers to explore smoother functions such as the Gaussian error linear unit (GELU)
+and the sigmoid linear unit (SiLU), as shown in figure C.4.
+439
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 444>>>
+
+Figure C.4 Different activation functions that can be used in a feed forward module (neural network). GELU
+and SiLU (Swish) offer smooth alternatives to ReLU, which has a sharp kink at input zero.
+GELU involves the Gaussian cumulative distribution function (CDF). Computing this CDF is
+slow because it uses piecewise logic and exponentials, which makes it hard to write fused,
+optimized GPU kernels (although a tanh approximation exists that uses cheaper operations
+and runs faster with near-identical results).
+In short, while GELU produces smooth activation curves, it is overall computationally
+more expensive than simpler functions.
+Newer models have largely replaced GELU with the SiLU (also known as Swish) function,
+which smoothly suppresses large negative inputs toward ~0 and is approximately linear for
+large positive inputs, as shown in figure C.4.
+440
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 445>>>
+
+SiLU has a similar smoothness, but it is slightly cheaper to compute than GELU and
+offers comparable modeling performance. In practice, SiLU is now used in most
+architectures, while GELU remains in use in only some models, such as Google's Gemma
+open-weight LLM. In the implementation of the feed forward module in listing C.2, this SiLU
+function is called via nn.functional.silu. The feed forward module in listing C.2 is also
+often called SwiGLU, an abbreviation that is derived from the terms Swish and GLU.
+C.3 Rotary position embeddings (RoPE)
+In transformer-based LLMs, positional encoding is necessary because of the attention
+mechanism. By default, attention treats the input tokens as if they have no order. In the
+original GPT architecture, absolute positional embeddings addressed this by adding a
+learned embedding vector for each position in the sequence, which is then added to the
+token embeddings.
+RoPE (short for rotary position embeddings) introduced a different approach: instead of
+adding position information as separate embeddings, it encodes position information by
+rotating the query and key vectors in the attention mechanism (section C.4) in a way that
+depends on each token's position. RoPE is an elegant idea, but also a long topic in itself.
+Interested readers can find more information in the original RoPE paper at 
+https://arxiv. 
+org/abs/2104. 09864. (While first introduced in 2021, RoPE became widely adopted with the
+release of the original Llama model in 2023 and has since become a staple in modern LLMs,
+so it is not unique to Qwen3.)
+RoPE can be implemented in two mathematically equivalent ways: the interleaved form,
+which pairs adjacent dimensions for rotation, or in a two-halves form, which splits the
+dimension into cosine and sine halves for convenience. Listing C.3 implements the two-
+halves variant, which can be easier to read.
+441
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 446>>>
+
+Listing C.3 RoPE functions .
+#A The shape is (batch_size, num_heads, seq_len, head_dim)
+#B Split x into first half and second half
+#C It's ok to use lower-precision after applying cos and sin rotation
+import torch
+def compute_rope_params(head_dim, theta_base=10_000, context_length=4096,
+dtype=torch.float32):
+assert head_dim % 2 == 0, "Embedding dimension must be even"
+inv_freq = 1.0 / (theta_base ** (
+torch.arange(0, head_dim, 2, dtype=dtype)[: (head_dim // 2)].float()
+/ head_dim
+))
+positions = torch.arange(context_length, dtype=dtype)
+angles = positions[:, None] * inv_freq[None, :]
+angles = torch.cat([angles, angles], dim=1)
+cos = torch.cos(angles)
+sin = torch.sin(angles)
+return cos, sin
+def apply_rope(x, cos, sin, offset=0):
+batch_size, num_heads, seq_len, head_dim = x.shape    #A
+assert head_dim % 2 == 0, "Head dimension must be even"
+x1 = x[..., : head_dim // 2]  # First half    #B
+x2 = x[..., head_dim // 2:]  # Second half    #B
+cos = cos[offset:offset + seq_len, :].unsqueeze(0).unsqueeze(0)
+sin = sin[offset:offset + seq_len, :].unsqueeze(0).unsqueeze(0)
+# Shape after:  (1, 1, seq_len, head_dim)
+rotated = torch.cat((-x2, x1), dim=-1)
+x_rotated = (x * cos) + (rotated * sin)
+return x_rotated.to(dtype=x.dtype)    #C
+442
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 447>>>
+
+The RoPE code in listing C.3 will be used in the grouped query attention mechanism in
+section C.4.
+ROPE IMPLEMENTATION VARIANTS
+Readers familiar with the original RoPE paper ( https://arxiv. org/abs/2104. 09864),
+you may be wondering about the particular implementation I have chosen.
+There are two common styles to implement RoPE, which are mathematically
+equivalent. The implementations mainly differ in how the rotation matrix pairs
+dimensions. I chose the split-halves style as it is a bit easier to read and implement.
+Rotation matrix:
+Here, the embedding dimensions are split into two halves and then each one is
+rotated in blocks.
+2) Interleaved (even/odd) style (original paper, Llama repo):
+Rotation matrix:
+1) Split-halves style (this book, Hugging Face Transformers):
+[ x0   x1   x2   x3   x4   x5   x6   x7 ]
+│    │    │    │    │    │    │    │
+▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
+cos  cos  cos  cos  sin  sin  sin  sin
+[ cosθ   -sinθ    0      0   ... ]
+[ sinθ    cosθ    0      0   ... ]
+[  0       0    cosθ   -sinθ ... ]
+[  0       0    sinθ    cosθ ... ]
+[ x0   x1   x2   x3   x4   x5   x6   x7 ]
+│    │    │    │    │    │    │    │
+▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
+cos  sin  cos  sin  cos  sin  cos  sin
+[ cosθ  -sinθ    0      0   ... ]
+[ sinθ   cosθ    0      0   ... ]
+[  0      0    cosθ   -sinθ ... ]
+[  0      0    sinθ    cosθ ... ]
+443
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 448>>>
+
+Here, embedding dims are interleaved as even/odd cosine/sine pairs.
+Both layouts encode the same relative positions. The only difference is how
+dimensions are paired.
+C.4 Grouped query attention (GQA)
+Grouped query attention (GQA) has become the standard, more compute- and parameter-
+efficient alternative to the original multi-head attention (MHA) mechanism.
+Unlike MHA, where each head also has its own set of keys and values, to reduce memory
+usage, GQA groups multiple heads to share the same key and value projections, as shown
+in figure C.5.
+Figure C.5 A comparison between MHA and GQA. Here, the group size is 2, where a key and value pair is
+shared among 2 queries.
+So, the core idea behind GQA, shown in figure C.5, is to reduce the number of key and
+value heads by sharing them across multiple query heads. This (1) lowers the model's
+parameter count and (2) reduces the memory bandwidth usage for key and value tensors
+during inference since fewer keys and values need to be stored and retrieved from the KV
+cache (section C.7).
+While GQA is primarily a computational efficiency workaround for MHA, ablation studies
+(as presented in the original GQA paper, https://arxiv. org/abs/2305. 13245) show that it
+performs comparably to standard MHA in terms of LLM modeling performance.
+Listing C.4 implements the GQA mechanism with KV cache support.
+444
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 449>>>
+
+Listing C.4 Grouped query attention .
+class GroupedQueryAttention(nn.Module):
+def __init__(self, d_in, num_heads, num_kv_groups, head_dim=None,
+qk_norm=False, dtype=None):
+super().__init__()
+assert num_heads % num_kv_groups == 0
+self.num_heads = num_heads
+self.num_kv_groups = num_kv_groups
+self.group_size = num_heads // num_kv_groups
+if head_dim is None:
+assert d_in % num_heads == 0
+head_dim = d_in // num_heads
+self.head_dim = head_dim
+self.d_out = num_heads * head_dim
+self.W_query = nn.Linear(
+d_in, self.d_out, bias=False, dtype=dtype
+)
+self.W_key = nn.Linear(
+d_in, num_kv_groups * head_dim, bias=False,dtype=dtype
+)
+self.W_value = nn.Linear(
+d_in, num_kv_groups * head_dim, bias=False, dtype=dtype
+)
+self.out_proj = nn.Linear(self.d_out, d_in, bias=False, dtype=dtype)
+if qk_norm:
+self.q_norm = RMSNorm(head_dim, eps=1e-6)
+self.k_norm = RMSNorm(head_dim, eps=1e-6)
+else:
+self.q_norm = self.k_norm = None
+def forward(self, x, mask, cos, sin, start_pos=0, cache=None):
+b, num_tokens, _ = x.shape
+queries = self.W_query(x)            #A
+keys = self.W_key(x)                 #B
+values = self.W_value(x)             #B
+445
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 450>>>
+
+queries = queries.view(b, num_tokens, self.num_heads,
+self.head_dim).transpose(1, 2)
+keys_new = keys.view(b, num_tokens, self.num_kv_groups,
+self.head_dim).transpose(1, 2)
+values_new = values.view(b, num_tokens, self.num_kv_groups,
+self.head_dim).transpose(1, 2)
+if self.q_norm:
+queries = self.q_norm(queries)
+if self.k_norm:
+keys_new = self.k_norm(keys_new)
+queries = apply_rope(queries, cos, sin, offset=start_pos)
+keys_new = apply_rope(keys_new, cos, sin, offset=start_pos)
+if cache is not None:
+prev_k, prev_v = cache
+keys = torch.cat([prev_k, keys_new], dim=2)
+values = torch.cat([prev_v, values_new], dim=2)
+else:
+start_pos = 0                    #C
+keys, values = keys_new, values_new            
+next_cache = (keys, values)
+keys = keys.repeat_interleave(       #D
+self.group_size, dim=1           #D
+)                                    #D
+values = values.repeat_interleave(   #D
+self.group_size, dim=1           #D
+)                                    #D
+attn_scores = queries @ keys.transpose(2, 3)
+attn_scores = attn_scores.masked_fill(mask, -torch.inf)
+attn_weights = torch.softmax(
+attn_scores / self.head_dim**0.5, dim=-1
+)
+context = (attn_weights @ values).transpose(1, 2)
+context = context.reshape(b, num_tokens, self.d_out)
+return self.out_proj(context), next_cache
+446
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 451>>>
+
+You may have noticed that the GQA mechanism in listing C.4 also includes a qk_norm
+parameter. This is not part of the standard GQA design. When qk_norm=True, an additional
+Query/Key-RMSNorm-based normalization, called QKNorm, is applied to both the queries
+and keys, which is a technique used in Qwen3. As discussed earlier in the RMSNorm section
+(section C.1), QKNorm helps improve training stability.
+C.5 Transformer block
+The transformer block is the central component of an LLM, which combines all the individual
+elements covered in this appendix so far. As shown in figure C.6, it is repeated multiple
+times; in the 0.6-billion-parameter version of Qwen3, it is repeated 28 times.
+#A The shape is (b, num_tokens, num_heads * head_dim)
+#B The shapes are (b, num_tokens, num_kv_groups * head_dim)
+#C Reset RoPE
+#D Expand K and V to match number of heads
+447
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 452>>>
+
+Figure C.6 The Structure of the transformer block in Qwen3. Each block includes RMSNorm, RoPE, masked
+grouped-query attention, and a feed-forward module, and is repeated 28 times in the 0.6B-parameter model.
+Listing C.5 implements the transformer block shown in figure C.6.
+448
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 453>>>
+
+As we can see, in listing C.5, the transformer block simply connects various elements we
+implemented in previous sections.
+C.6 Main model code
+In this section, we will define the Qwen3Model class that we imported and used in chapter 2.
+To implement the Qwen3Model class, the code in listing C.6 follows the architecture
+previously shown in figure C.6, where the transformer block sits at the heart of the LLM.
+Listing C.5 Transformer block .
+#A The shape is (batch_size, num_tokens, emb_size)
+class TransformerBlock(nn.Module):
+def __init__(self, cfg):
+super().__init__()
+self.att = GroupedQueryAttention(
+d_in=cfg["emb_dim"],
+num_heads=cfg["n_heads"],
+head_dim=cfg["head_dim"],
+num_kv_groups=cfg["n_kv_groups"],
+qk_norm=cfg["qk_norm"],
+dtype=cfg["dtype"]
+)
+self.ff = FeedForward(cfg)
+self.norm1 = RMSNorm(cfg["emb_dim"], eps=1e-6)
+self.norm2 = RMSNorm(cfg["emb_dim"], eps=1e-6)
+def forward(self, x, mask, cos, sin, start_pos=0, cache=None):
+shortcut = x
+x = self.norm1(x)
+x, next_cache = self.att(
+x, mask, cos, sin, start_pos=start_pos,cache=cache
+)  #A
+x = x + shortcut
+shortcut = x
+x = self.norm2(x)
+x = self.ff(x)
+x = x + shortcut
+return x, next_cache
+449
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 454>>>
+
+Listing C.6 Main Qwen3Model code .
+class Qwen3Model(nn.Module):
+def __init__(self, cfg):
+super().__init__()
+# Main model parameters
+self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"],
+dtype=cfg["dtype"])
+self.trf_blocks = nn.ModuleList(
+[TransformerBlock(cfg) for _ in range(cfg["n_layers"])]
+)
+self.final_norm = RMSNorm(cfg["emb_dim"])
+self.out_head = nn.Linear(
+cfg["emb_dim"], cfg["vocab_size"],
+bias=False, dtype=cfg["dtype"]
+)
+# Reusable utilities
+if cfg["head_dim"] is None:
+head_dim = cfg["emb_dim"] // cfg["n_heads"]
+else:
+head_dim = cfg["head_dim"]
+cos, sin = compute_rope_params(
+head_dim=head_dim,
+theta_base=cfg["rope_base"],
+context_length=cfg["context_length"]
+)
+self.register_buffer("cos", cos, persistent=False)
+self.register_buffer("sin", sin, persistent=False)
+self.cfg = cfg
+self.current_pos = 0  # Track current position in KV cache
+def forward(self, in_idx, cache=None):
+tok_embeds = self.tok_emb(in_idx)
+x = tok_embeds
+num_tokens = x.shape[1]
+if cache is not None:
+pos_start = self.current_pos
+pos_end = pos_start + num_tokens
+self.current_pos = pos_end
+mask = torch.triu(
+450
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 455>>>
+
+Since we already have all the main ingredients, the Qwen3Model class in listing C.6 only
+adds a few more components around the transformer block, namely the embedding and
+output layers (including one more RMSNorm layer). However, the code may appear
+somewhat complicated, which is due to the KV cache option.
+As discussed in chapter 2, the KV cache can speed up the text generation process, but it
+is a topic outside the scope of this book. Interested readers can find more information
+about KV caching in my Understanding and Coding the KV Cache in LLMs from Scratch
+article at https://magazine. sebastianraschka. com/p/coding- the-kv-cache- in-llms.
+#A Prefill: Shape (1, 1, T, T) to broadcast across batch and heads. Cached: Shape (1, 1, T, K+T) where T=new tokens, 
+K=cached keys.
+torch.ones(
+pos_end, pos_end, device=x.device, dtype=torch.bool
+),
+diagonal=1
+)[pos_start:pos_end, :pos_end]
+else:
+pos_start = 0  # Not strictly necessary but helps torch.compile
+mask = torch.triu(
+torch.ones(num_tokens, num_tokens, device=x.device,
+dtype=torch.bool),
+diagonal=1
+)
+mask = mask[None, None, :, :]                 #A
+for i, block in enumerate(self.trf_blocks):
+blk_cache = cache.get(i) if cache else None
+x, new_blk_cache = block(x, mask, self.cos, self.sin,
+start_pos=pos_start,
+cache=blk_cache)
+if cache is not None:
+cache.update(i, new_blk_cache)
+x = self.final_norm(x)
+logits = self.out_head(x.to(self.cfg["dtype"]))
+return logits
+def reset_kv_cache(self):
+self.current_pos = 0
+451
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 456>>>
+
+Note that the Qwen3Model class, as implemented in listing C.6, supports various model
+sizes (see appendix D for more information). In chapter 2, we use the 0.6-billion-parameter
+model as it is the least resource-intensive model in the Qwen3 model family. The specific
+configuration of this model is visualized in figure C.7.
+Figure C.7 Architecture of the Qwen3 0.6B model. The model consists of a token embedding layer followed by
+28 transformer blocks, each containing RMSNorm, RoPE, QKNorm, masked grouped-query attention with 16
+heads, and a feed-forward module with an intermediate size of 3,072.
+452
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 457>>>
+
+To use the 0.6B model shown in figure C.7 via the Qwen3Model class, we can define the
+following configuration in listing C.7 that we provide as input ( cfg=QWEN_CONFIG_06_B)
+upon instantiating a new Qwen3Model instance.
+We will use the QWEN_CONFIG_06_B configuration from listing C.7 to instantiate the Qwen3
+0.6B model later in section C.9.
+MORE PRECISE CONTEXT LENGTH INFORMATION
+For Qwen3 0.6B, the default maximum supported context length is 40,960 tokens.
+However, the model itself was trained with only 32,768 tokens. The 40,960-token
+allocation reserves 32,768 tokens for model outputs (the generated text) and 8,192
+tokens for typical prompts (the user's question or instruction).
+To put this in perspective, 40 thousand tokens correspond to roughly one half of
+the first Harry Potter book.
+Since this length is sufficient for most reasoning tasks, the developers note that
+context-extension methods (such as YaRN) are not recommended unless the average
+context regularly exceeds 32 thousand tokens, as enabling them in shorter contexts
+can slightly degrade performance.
+Listing C.7 Qwen3 0.6B configuration
+QWEN_CONFIG_06_B = {
+"vocab_size": 151_936,     # Vocabulary size
+"context_length": 40_960,  # Length originally used during training
+"emb_dim": 1024,           # Embedding dimension
+"n_heads": 16,             # Number of attention heads
+"n_layers": 28,            # Number of layers
+"hidden_dim": 3072,        # Size of intermediate dim in FeedForward
+"head_dim": 128,           # Size of the heads in GQA
+"qk_norm": True,           # Whether to normalize queries & keys in GQA
+"n_kv_groups": 8,          # Key-Value groups for GQA
+"rope_base": 1_000_000.0,  # The base in RoPE's "theta"
+"dtype": torch.bfloat16,   # Lower-precision dtype to reduce memory
+}
+453
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 458>>>
+
+C.7 KV cache
+The KV-cache-related heavy-lifting is mostly done in the Qwen3Model (listing C.6) and
+GroupedQueryAttention (listing C.4) code. The KVCache, shown in listing C.8, stores the
+key-value pairs themselves during text generation, which results in the speedup we
+experienced when enabling KV caching in chapter 2.
+The KVCache class in listing C.8 is used inside the generate_text_basic_stream_cache
+function that we implemented in chapter 2.
+C.8 Tokenizer
+The tokenizer code is somewhat complicated, as it supports a variety of special tokens, in
+addition to the base model and the so-called "Thinking" model variant of Qwen3, which is a
+reasoning model. The full reimplementation of the tokenizer is shown in listing C.9.
+Listing C.8 KV Cache
+class KVCache:
+def __init__(self, n_layers):
+self.cache = [None] * n_layers
+def get(self, layer_idx):
+return self.cache[layer_idx]
+def update(self, layer_idx, value):
+self.cache[layer_idx] = value
+def get_all(self):
+return self.cache
+def reset(self):
+for i in range(len(self.cache)):
+self.cache[i] = None
+454
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 459>>>
+
+Listing C.9 Tokenizer
+import re
+from tokenizers import Tokenizer
+class Qwen3Tokenizer:
+_SPECIALS = [
+"<|endoftext|>",
+"<|im_start|>", "<|im_end|>",
+"<|object_ref_start|>", "<|object_ref_end|>",
+"<|box_start|>", "<|box_end|>",
+"<|quad_start|>", "<|quad_end|>",
+"<|vision_start|>", "<|vision_end|>",
+"<|vision_pad|>", "<|image_pad|>", "<|video_pad|>",
+]
+_SPLIT_RE = re.compile(r"(<\|[^>]+?\|>)")
+def __init__(self,
+tokenizer_file_path="tokenizer-base.json",
+apply_chat_template=False,
+add_generation_prompt=False,
+add_thinking=False):
+self.apply_chat_template = apply_chat_template
+self.add_generation_prompt = add_generation_prompt
+self.add_thinking = add_thinking
+tok_path = Path(tokenizer_file_path)
+if not tok_path.is_file():
+raise FileNotFoundError(
+f"Tokenizer file '{tok_path}' not found. "
+)
+self._tok = Tokenizer.from_file(str(tok_path))
+self._special_to_id = {t: self._tok.token_to_id(t) 
+for t in self._SPECIALS}
+self.pad_token = "<|endoftext|>"
+self.pad_token_id = self._special_to_id.get(self.pad_token)
+f = tok_path.name.lower()                      #A
+if "base" in f and "reasoning" not in f:       #A
+self.eos_token = "<|endoftext|>"           #A
+else:                                          #A
+455
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 460>>>
+
+Note that my Qwen3Tokenizer reimplementation in listing C.9 may appear somewhat
+complicated, as it aims to replicate the behavior of the official tokenizer released by the
+Qwen3 team in the Hugging Face Transformers library.
+#A Match HF behavior: chat model: <|im_end|>, base model: <|endoftext|>
+#B insert no <think> tag, just a new line
+self.eos_token = "<|im_end|>"              #A
+self.eos_token_id = self._special_to_id.get(self.eos_token)
+def encode(self, prompt, chat_wrapped=None):
+if chat_wrapped is None:
+chat_wrapped = self.apply_chat_template
+stripped = prompt.strip()
+if stripped in self._special_to_id and "\n" not in stripped:
+return [self._special_to_id[stripped]]
+if chat_wrapped:
+prompt = self._wrap_chat(prompt)
+ids = []
+for part in filter(None, self._SPLIT_RE.split(prompt)):
+if part in self._special_to_id:
+ids.append(self._special_to_id[part])
+else:
+ids.extend(self._tok.encode(part).ids)
+return ids
+def decode(self, token_ids):
+return self._tok.decode(token_ids, skip_special_tokens=False)
+def _wrap_chat(self, user_msg):
+s = f"<|im_start|>user\n{user_msg}<|im_end|>\n"
+if self.add_generation_prompt:
+s += "<|im_start|>assistant"
+if self.add_thinking:
+s += "\n"          #B
+else:
+s += "\n<think>\n\n</think>\n\n"
+return s
+456
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 461>>>
+
+At first glance, it appears to have a few quirks. For example, when add_thinking=True,
+no "\n<think>\n\n</think>\n\n" tokens are inserted (where \n is anewline character),
+and when add_thinking=False, these tokens are added. This is intentional because the
+non-base Qwen3 0.6B model is a hybrid that supports both reasoning ("thinking") and
+standard modes.
+C.9 Using the model
+Let's now instantiate and use the model to confirm that the code works by reusing the text
+generation approach from chapter 2.
+First, we instantiate the model using the pre-trained model weights:
+The output shows the structure of the instantiated model, which should match the values
+we used in the configuration file in listing C.7:
+#A Optional: Uncomment to use automatic device picker
+from pathlib import Path
+import torch
+from reasoning_from_scratch.ch02 import get_device
+from reasoning_from_scratch.qwen3 import download_qwen3_small
+# device = get_device()         #A
+device = torch.device("cpu")
+download_qwen3_small(kind="base", tokenizer_only=False, out_dir="qwen3")
+tokenizer_file_path = Path("qwen3") / "tokenizer-base.json"
+model_file = Path("qwen3") / "qwen3-0.6B-base.pth"
+tokenizer = Qwen3Tokenizer(tokenizer_file_path=tokenizer_file_path)
+model = Qwen3Model(QWEN_CONFIG_06_B)
+model.load_state_dict(torch.load(model_file))
+model.to(device)
+457
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 462>>>
+
+Next, we re-use the text generation functions from chapter 2 to generate text:
+✓ qwen3/qwen3-0.6B-base.pth already up-to-date
+✓ qwen3/tokenizer-base.json already up-to-date
+Qwen3Model(
+(tok_emb): Embedding(151936, 1024)
+(trf_blocks): ModuleList(
+(0-27): 28 x TransformerBlock(
+(att): GroupedQueryAttention(
+(W_query): Linear(in_features=1024, out_features=2048, bias=False)
+(W_key): Linear(in_features=1024, out_features=1024, bias=False)
+(W_value): Linear(in_features=1024, out_features=1024, bias=False)
+(out_proj): Linear(in_features=2048, out_features=1024, bias=False)
+(q_norm): RMSNorm()
+(k_norm): RMSNorm()
+)
+(ff): FeedForward(
+(fc1): Linear(in_features=1024, out_features=3072, bias=False)
+(fc2): Linear(in_features=1024, out_features=3072, bias=False)
+(fc3): Linear(in_features=3072, out_features=1024, bias=False)
+)
+(norm1): RMSNorm()
+(norm2): RMSNorm()
+)
+)
+(final_norm): RMSNorm()
+(out_head): Linear(in_features=1024, out_features=151936, bias=False)
+)
+458
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 463>>>
+
+Since we used the same prompt as in chapter 2, the generated text matches the generated
+text from chapter 2 exactly:
+import time
+from reasoning_from_scratch.ch02 import (
+generate_text_basic_stream_cache,
+generate_stats
+)
+prompt = "Explain large language models in a single sentence."
+input_token_ids_tensor = torch.tensor(
+tokenizer.encode(prompt),
+device=device
+).unsqueeze(0)
+max_new_tokens = 200
+start_time = time.time()
+generated_ids = []
+for token in generate_text_basic_stream_cache(
+model=model,
+token_ids=input_token_ids_tensor,
+max_new_tokens=max_new_tokens,
+eos_token_id=tokenizer.eos_token_id
+):
+token_id = token.squeeze(0).tolist()
+print(
+tokenizer.decode(token_id),
+end="",
+flush=True
+)
+next_token_id = token.squeeze(0)
+generated_ids.append(next_token_id)  # Collect generated tokens
+end_time = time.time()
+output_token_ids_tensor = torch.cat(generated_ids, dim=0)
+generate_stats(output_token_ids_tensor, tokenizer, start_time, end_time)
+459
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 464>>>
+
+While the main chapters use the 0.6-billion-parameter variant of Qwen3 to lower the
+resource requirements for this book, interested readers can find more information on how
+to use the larger models in appendix D.
+Time: 1.46 sec
+28 tokens/sec
+Large language models are artificial intelligence systems that can
+understand, generate, and process human language, enabling them to
+perform a wide range of tasks, from answering questions to writing
+articles, and even creating creative content.
+460
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 465>>>
+
+Appendix D. Using larger LLMs
+The main chapters use the 0.6-billion-parameter (0.6B) Qwen3 base model because it is
+the smallest model in the Qwen3 family and therefore the easiest to run on consumer
+hardware.
+However, the same Qwen3Model implementation from appendix C is not limited to the
+0.6B checkpoint. We can also use it to load larger Qwen3 checkpoints with the same from-
+scratch PyTorch code. In practice, this means that once we understand how to work with
+the 0.6B model, moving to a larger model mainly involves three changes:
+1. selecting the matching configuration dictionary;    
+2. downloading the larger checkpoint from Hugging Face;    
+3. loading the appropriate tokenizer for the base or reasoning variant.    
+This appendix illustrates this process using the Qwen3 4B model as a concrete example,
+because it is large enough to be meaningfully stronger than the 0.6B model while still being
+easier to handle than the larger 8B, 14B, and 32B variants.
+D.1 Larger dense Qwen3 configurations
+The repository includes configuration dictionaries for several larger Qwen3 models in the
+reasoning_from_scratch.appendix_c Python library, which are listed in table D.1. (You
+can also view the source code in the supplementary materials at https://github. com/rasbt/ 
+reasoning- from-scratch/ blob/main/ reasoning_ from_scratch/ appendix_ c.py).
+461
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 466>>>
+
+Table D.1 Qwen3 configurations (larger than 0.6B)
+Model size Configuration Python
+dictionary
+1.7B QWEN3_CONFIG_1_7B
+4B QWEN3_CONFIG_4B
+8B QWEN3_CONFIG_8B
+14B QWEN3_CONFIG_14B
+32B QWEN3_CONFIG_32B
+Note that the models listed in table D.1 are the dense Qwen3 variants, similar to the
+Qwen3 0.6B model used in the main chapters and discussed in appendix C. Here, "dense"
+means these are not the sparse Mixture-of-Experts (MoE) variants of Qwen3. MoE models
+are not supported by this book's code, but a from-scratch implementation is available here:
+https://github. com/rasbt/ LLMs-from- scratch/tree/ main/ch05/ 11_qwen3.
+Figure D.1 summarizes the differences between the models in table D.1 more visually.
+462
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 467>>>
+
+Figure D.1 Comparison of different Qwen3 variants, from 0.6-billion to 32-billion parameters.
+As can be seen in figure D.1, all the different Qwen3 size variants use the same overall
+architecture pattern as the 0.6B model from appendix C. Concretely, they still use token
+embeddings, grouped-query attention, rotary position embeddings, feed-forward layers,
+and RMS normalization. What changes are the model dimensions, such as the embedding
+size, the number of layers, the number of attention heads, and the feed-forward hidden
+dimension.
+Table D.2 lists the memory requirement estimates when loading the models into RAM
+(and GPU RAM). Here, as a rough lower bound, storing weights in bfloat16 precision (which
+is the common default for LLMs) requires about 2 bytes per parameter.
+463
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 468>>>
+
+Table D.2 Qwen3 models sizes
+Model size Rough weight memory in
+bfloat16
+1.7B about 3.4 GB
+4B about 8 GB
+8B about 16 GB
+14B about 28 GB
+32B about 64 GB
+The numbers in table D.2 are only approximate lower bounds for the weights themselves.
+In practice, the real runtime memory usage is higher because we also need memory for
+activations, temporary buffers, the KV cache, and so on. In addition, model loading can
+temporarily increase memory usage because tensors may exist in more than one place
+while they are being copied into the Qwen3Model instance. Please see the supplementary
+materials of my Build A Large Language Model (From Scratch) book for more details on
+this: 
+https://github. com/rasbt/ LLMs-from- scratch/tree/ main/ch05/ 08_memory_ efficient_ 
+weight_loading
+D.2 Downloading larger checkpoints overview
+Unlike the 0.6B checkpoints used in the main chapters, which I converted into a PyTorch
+checkpoint to minimize external code dependencies, larger official Qwen3 models are
+typically distributed as safetensors files, sometimes split across multiple shards.
+The reasoning-from-scratch Python library provides a helper function,
+download_from_huggingface_from_snapshots, to handle this. This function, which we will
+use in the next section, downloads the Hugging Face snapshot into a local directory and
+then loads either a single model.safetensors file or multiple shards referenced via a
+model.safetensors.index.json file.
+Because this helper relies on additional packages that were not required in the earlier
+chapters, you may need to install them first:
+uv add huggingface_hub safetensors
+or
+pip install huggingface_hub safetensors
+Once these packages are installed, loading a larger checkpoint follows the same broad
+pattern as before. For instance, we download the files, instantiate the model, load the
+weights, prepare the tokenizer, and then run the text generation, as we will see in the next
+section.
+464
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 469>>>
+
+D.3 Loading a larger base model
+We will now walk through a complete example using the official Qwen3 4B base model. The
+first step, shown in listing D.1, is to download the model snapshot from the Hugging Face
+Model hub (https://huggingface. co/Qwen/Qwen3- 4B-Base):
+The local_dir path specifies where the snapshot should be stored on disk. In this
+example, we keep the 4B base model in a dedicated qwen3-4b-base folder so that it stays
+separate from the smaller qwen3 directory used throughout the main chapters.
+Next, we use the code in listing D.2 to instantiate the 4B model and load the Hugging
+Face weights into the from-scratch Qwen3Model implementation:
+Listing D.1 Download model weights
+from pathlib import Path
+from reasoning_from_scratch.ch02 import get_device
+from reasoning_from_scratch.appendix_c import (
+download_from_huggingface_from_snapshots,
+)
+device = get_device()
+local_dir = Path("qwen3-4b-base")
+weights = download_from_huggingface_from_snapshots(
+repo_id="Qwen/Qwen3-4B-Base",
+local_dir=local_dir,
+)
+465
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 470>>>
+
+The QWEN3_CONFIG_4B dictionary defines the architecture dimensions for the 4B model. The
+load_hf_weights_into_qwen helper then maps the Hugging Face parameter names into
+the parameter names used by our own implementation. After that, model.to(device)
+moves the model to the selected device, and model.eval() switches the model into
+inference mode.
+After the model is loaded, we prepare the tokenizer via the code in listing D.3:
+Listing D.2 Load weights into Qwen3Model
+from reasoning_from_scratch.qwen3 import (
+Qwen3Model,
+load_hf_weights_into_qwen,
+)
+from reasoning_from_scratch.appendix_c import QWEN3_CONFIG_4B
+model = Qwen3Model(QWEN3_CONFIG_4B)
+load_hf_weights_into_qwen(
+model,
+param_config={
+"n_layers": QWEN3_CONFIG_4B["n_layers"],
+"hidden_dim": QWEN3_CONFIG_4B["hidden_dim"],
+},
+params=weights,
+)
+model.to(device)
+model.eval()
+Listing D.3 Load base tokenizer
+from reasoning_from_scratch.qwen3 import Qwen3Tokenizer
+import shutil
+tokenizer_src = local_dir / "tokenizer.json"
+tokenizer_path = local_dir / "tokenizer-base.json"
+if not tokenizer_path.exists():
+shutil.copyfile(tokenizer_src, tokenizer_path)
+tokenizer = Qwen3Tokenizer(tokenizer_file_path=tokenizer_path)
+466
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 471>>>
+
+The Hugging Face snapshot stores the tokenizer under the generic name
+"tokenizer.json". In listing D.3, we copy it to "tokenizer-base.json" so that it is easy
+to distinguish from the reasoning tokenizer that we will use in the next section.
+We can now use the model for generation, exactly as we did with the smaller 0.6B model
+in chapter 2, using the code in listing D.4:
+Similar to the main book content in chapter 2, we encode the input prompt, add a batch
+dimension via unsqueeze(0), and then stream the generated tokens one by one.
+The output is shown below:
+This is one of the nice properties of reusing the same Qwen3Model abstraction across model
+sizes. Once the checkpoint and tokenizer are set up correctly, the inference code looks
+essentially the same.
+Listing D.4 Generate text
+import torch
+from reasoning_from_scratch.ch02 import (
+generate_text_basic_stream_cache,
+)
+prompt = "Explain large language models in two sentences."
+input_ids = torch.tensor(
+tokenizer.encode(prompt),
+device=device,
+).unsqueeze(0)
+for token in generate_text_basic_stream_cache(
+model=model,
+token_ids=input_ids,
+max_new_tokens=64,
+eos_token_id=tokenizer.eos_token_id,
+):
+print(tokenizer.decode(token.squeeze(0).tolist()), end="", flush=True)
+Large language models are artificial intelligence systems that use deep learning
+techniques to understand and generate human-like text. They are trained on vast 
+amounts of data and can perform a wide range of natural language processing
+tasks, 
+such as translation, summarization, and question answering.
+467
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 472>>>
+
+D.4 Loading a larger reasoning variant
+The same idea also works for larger reasoning-style Qwen3 models. The architecture for a
+given model size stays the same. Compared to the previous section, only the checkpoint
+and tokenizer settings change.
+For example, to load the 4B reasoning variant instead of the 4B base variant, we would:
+switch the repository ID from Qwen/Qwen3-4B-Base to Qwen/Qwen3-4B;    
+copy or rename the tokenizer.json file to tokenizer-reasoning.json;    
+Initialize the tokenizer as follows, using the code in listing D.5:    
+These three tokenizer settings match the chat-style prompt formatting used by the
+reasoning models, as discussed in chapter 2 and 8. In other words, we still use the same
+4B architecture configuration (QWEN3_CONFIG_4B ), but we pair it with the reasoning
+checkpoint and the reasoning-style tokenizer behavior.
+The rest of the model-loading and model-usage code stays the same. We still download
+the snapshot, instantiate Qwen3Model(QWEN3_CONFIG_4B), load the weights via
+load_hf_weights_into_qwen, move the model to the target device, and then generate text
+using the same streaming function from chapter 2.
+D.5 Practical recommendations
+The main point of this appendix is that the same from-scratch model code from appendix C
+can be reused across larger official Qwen3 checkpoints, provided that we select the
+matching configuration dictionary and tokenizer setup.
+This means moving to a larger model is mostly a matter of loading a different checkpoint
+and configuration rather than learning an entirely new concept.
+If you want to experiment beyond the 4B example shown here, the 1.7B and 8B variants
+are natural next steps. The 1.7B model is a modest step up from 0.6B, in case the 4B is too
+resource-intensive for your hardware. The 8B model is substantially larger and may give
+stronger outputs if your hardware can handle it.
+Listing D.5 Load reasoning tokenizer
+tokenizer = Qwen3Tokenizer(
+tokenizer_file_path=tokenizer_path,
+apply_chat_template=True,
+add_generation_prompt=True,
+add_thinking=True,
+)
+468
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 473>>>
+
+Appendix E. Batching and
+throughput-oriented execution
+In the code we implemented throughout the main chapters, we usually process one prompt
+or example at a time. This keeps the code compact and easier to understand, and it also
+helps keep the resource requirements somewhat more manageable.
+In practice, the code in this book is already expensive to run, so adding batching support
+everywhere would often increase complexity without any real benefits in many cases,
+depending on your available hardware.
+That being said, if you have access to relatively modern GPUs with enough memory,
+batched execution, illustrated in figure E.1, is very useful in some settings. For example, if
+we want to evaluate many problems, sample several responses per prompt, or train on
+multiple examples at once, then batching can help increase the throughput and lower the
+overall time.
+This appendix explains the broad idea behind batching and shows how to use the
+batched implementations in the supplementary materials across different chapters.
+469
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 474>>>
+
+Figure E.1 An overview of single-example versus batched generation. In batched generation, several prompts
+are packed into one batch, processed in parallel, and then decoded together to improve throughput.
+E.1 Why batching helps
+When we talk about computational performance, it helps to separate between the following
+overall goals:
+1. latency: how quickly we get the answer for one prompt;    
+2. throughput: how many prompts we can process in a fixed amount of
+time.    
+470
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 475>>>
+
+Single-example generation is often best for understanding the conceptual implementation
+of a concept, minimizing latency, and for debugging.
+Batching can be seen as an extension of single-example generation that primarily
+targets throughput. For example, if we want to evaluate hundreds of problems on MATH-
+500, generate several self-consistency samples, or train on a larger distillation dataset,
+batching can reduce total runtime substantially on suitable hardware.
+However, batching is not automatically faster on every device. Small models on CPUs or
+less optimized GPUs may benefit only a little, or not at all, because we have to introduce
+additional code complexity, including padding and other overheads, that can offset the
+gains from the parallelism that we gain through batching.
+So batching is best understood as a throughput optimization, not as a universal
+speedup.
+E.2 Running batched generation
+The main technical obstacle in batching is that prompts usually have different lengths. One
+math problem may tokenize to 40 tokens while another may tokenize to 120 tokens, but
+PyTorch tensors still have to be rectangular. So if we want to run several prompts together,
+we need a way to pad shorter rows and keep track of which positions are real tokens and
+which are just padding tokens.
+Padding tokens are placeholder tokens that are added to a prompt to make it a certain
+length, for example to, extend a three-token prompt "3 + 3"  to a five-token prompt, we
+may add two additional padding tokens to the right or the left: "<pad><pad> 3 + 3" . (In
+practice, it doesn't matter which token we use as padding token, and it's common to use an
+end-of-sequence token like <eos> or <|endoftext|>.)
+Conceptually, padding and keeping track of padded positions makes batched generation
+more complicated than single-prompt generation. In the main chapters, we used the
+Qwen3Model class from reasoning_from_scratch.qwen3, which is the plain single-example
+implementation explained in appendix C.
+For batched generation, the supplementary materials therefore include a separate
+Qwen3Model class in reasoning_from_scratch.qwen3_batched, which can be used as a
+drop-in replacement but adds the bookkeeping needed for padding-aware execution that is
+required in batching.
+To make this concrete, it helps to start with a single-sequence example that looks very
+similar to the code we already used in the main chapters. Here, in listing E.1, we apply it to
+two very small prompts, but we still run them one after the other:
+471
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 476>>>
+
+The resulting output is:
+Listing E.1 Single-example generation
+#A The two prompts we sequentially process
+#B Force a new line after each answer
+import torch
+from reasoning_from_scratch.ch02 import (
+get_device,
+generate_text_basic_stream_cache,
+)
+from reasoning_from_scratch.ch03 import (
+load_model_and_tokenizer,
+render_prompt,
+)
+device = get_device()
+model, tokenizer = load_model_and_tokenizer(
+which_model="base",
+device=device,
+use_compile=False,
+)
+for problem in ["2+2?", "3+3=6?"]:  #A
+prompt = render_prompt(problem)
+input_ids = torch.tensor(
+tokenizer.encode(prompt),
+dtype=torch.long,
+device=device,
+).unsqueeze(0)
+for token in generate_text_basic_stream_cache(
+model=model,
+token_ids=input_ids,
+max_new_tokens=32,
+eos_token_id=tokenizer.eos_token_id,
+):
+next_token_id = token.squeeze(0)
+print(tokenizer.decode(next_token_id.tolist()), end="", flush=True)
+print()  #B
+472
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 477>>>
+
+The code in listing E.1 is still ordinary single-example generation. We render the prompt,
+tokenize it, add a batch dimension of size 1, and then stream the generated tokens as they
+arrive. This is conceptually simple, which is why the main chapters prefer this style.
+Listing E.2 now shows the corresponding batched version. The overall workflow is similar,
+but now we switch to reasoning_from_scratch.qwen3_batched, tokenize both prompts up
+front, left-pad them to the same length, and generate them together:
+\boxed{4}
+\boxed{6}
+473
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 478>>>
+
+The results are the same as before, but this time they are produced in parallel:
+Listing E.2 Batched generation
+#A Left-pad shorter sequences so all prompts in the batch have the same length
+#B Needed so generation can distinguish real tokens from padding
+from reasoning_from_scratch.qwen3_batched import (
+generate_text_basic_batched_cache,
+load_model_and_tokenizer,
+)
+model, tokenizer = load_model_and_tokenizer(
+which_model="base",
+device=device,
+use_compile=False,
+)
+problems = ["2+2?", "3+3=6?"]
+prompts = [render_prompt(problem) for problem in problems]
+tokenized = [tokenizer.encode(p) for p in prompts]
+pad_id = tokenizer.pad_token_id
+max_len = max(len(t) for t in tokenized)
+left_padded = [  #A
+[pad_id] * (max_len - len(t)) + t
+for t in tokenized
+]
+input_ids = torch.tensor(left_padded, dtype=torch.long, device=device)
+generated = generate_text_basic_batched_cache(
+model=model,
+token_ids=input_ids,
+max_new_tokens=32,
+eos_token_id=tokenizer.eos_token_id,
+pad_id=pad_id,  #B
+)
+for row in generated:
+eos_pos = (row == tokenizer.eos_token_id).nonzero(as_tuple=True)[0]
+if len(eos_pos) > 0:
+row = row[:eos_pos[0]]
+print(tokenizer.decode(row.tolist()))
+474
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 479>>>
+
+In this example, we use the non-streaming batched helper, so we wait until the whole batch
+is finished before decoding and printing the results. That keeps the usage example simple
+and makes it easier to see the role of padding before we dig into the internal masking logic.
+There is also a more optimized text generation function variant,
+generate_text_basic_batched_cache_stop, which removes finished rows from the active
+compute batch instead of carrying them along until the longest row finishes. In contrast,
+the generate_text_basic_batched_cache we use in listing E.2 keeps every row in the
+active batch for every decode step.
+In generate_text_basic_batched_cache, once a row has emitted EOS, the
+implementation forces that row to keep producing EOS so that the batch shape stays
+aligned, even though the row is already finished from the perspective of the final decoded
+output. The difference between these two functions is illustrated in figure E.2.
+\boxed{4}
+\boxed{6}
+475
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 480>>>
+
+Figure E.2 Sequential generation (1) versus regular batched generation (2) and early-stop batched generation
+(3). The regular batched helper (2) keeps finished rows in the batch as placeholder EOS rows, whereas the
+_stop variant (3) removes finished rows from the active compute batch as soon as they emit EOS.
+As a side note, Qwen3 uses <|endoftext|> as the EOS token for the base model, but
+figure E.2 labels it simply as <eos> for visual compactness.
+The next section goes into a bit more detail regarding how the padding is handled
+internally.
+E.3 Padding and attention masks
+In single-example mode, if we tokenize a short prompt such as "2+2?", we can pass it to
+the model as a simple tensor of shape (1, 4):
+476
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 481>>>
+
+Internally, the model builds a standard causal attention mask internally so that each
+position can only attend to itself and earlier tokens. If you are unfamiliar with causal
+attention masks and self-attention, I have an article that provides more background
+information: https://magazine. sebastianraschka. com/p/understanding- and-coding- self-
+attention.
+The causal attention mask for the "2+2?" prompt is illustrated in figure E.3.
+input_ids = torch.tensor([[17, 10, 17, 30]])
+477
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 482>>>
+
+Figure E.3 The causal mask used in single-example generation. Tokens can attend only to themselves and
+earlier positions, which is the standard autoregressive setup.
+In the causal mask shown in figure E.3, 1 means "masked out" and 0 means "allowed".
+In this context, as illustrated in figure E.3, the first token cannot look ahead to later
+positions, the second token can only look at the first two positions, and so on, which is the
+standard autoregressive masking pattern.
+Batching changes the situation because different prompts usually have different lengths.
+Suppose we process "2+2?" together with the slightly longer prompt, "3+3=6?".
+478
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 483>>>
+
+Since PyTorch tensors must be rectangular, the shorter row has to be padded to match
+the longer one, which is illustrated in figure E.4 using left padding.
+Figure E.4 Left padding in batched generation. The shorter row is padded up to the maximum sequence length
+in the batch, and the padding-aware mask ensures that these padded positions do not affect attention.
+Note that figure E.4 shows that we keep an additional attn_mask internally. This mask is
+used to keep track of the padded positions, where True means padded and False means
+not padded.
+We use this additional attn_mask to identify the tokens in the causal mask that
+correspond to the pad token IDs.
+Masking padded keys and zeroing padded queries are important steps to make batching
+behave similarly to the single-example execution.
+In the remainder of this appendix, we will see how we can use scripts from the
+supplementary materials that implement the optional batched variants for the different
+chapters.
+E.4 Chapter 3: batched MATH-500 evaluation
+The supplementary materials include a script for the single-example evaluation method
+from chapter 3 that we can download and run directly using the download function we
+introduced in chapter 7:
+479
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 484>>>
+
+After downloading the script and dataset via listing E.3, we can run the single-example
+evaluation from the terminal as shown below (if you are not using uv, simply replace uv
+run with python):
+The supplementary material also includes a batched version that applies the batching
+method we discussed above. The download is almost identical, except that we replace
+evaluate_math500.py with evaluate_math500_batched.py, as shown in listing E.4:
+The usage of the batched script is also very similar to the non-batched version, except that
+we now provide an additional --batch_size argument to specify how many prompts and
+answers the model should process in parallel:
+Listing E.3 Download single-example evaluation script
+from reasoning_from_scratch.ch07 import download_from_github
+download_from_github(
+"ch03/02_math500-verifier-scripts/evaluate_math500.py"
+)
+download_from_github(
+"ch03/01_main-chapter-code/math500_test.json",
+out="math500_test.json",
+)
+uv run evaluate_math500.py \
+--dataset_size 500 \
+--which_model "reasoning"
+Listing E.4 Download evaluation script with batch support
+download_from_github(
+"ch03/02_math500-verifier-scripts/evaluate_math500_batched.py"
+)
+uv run evaluate_math500_batched.py \
+--dataset_size 500 \
+--which_model "reasoning" \
+--batch_size 64
+480
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 485>>>
+
+The ideal batch size depends entirely on what your hardware can handle, so in practice it is
+best to start with a smaller value and then scale upward until you hit the throughput and
+memory limit that makes sense for your setup.
+We will return to a comparison of the single-example and batched generation
+performances at the end of the chapter.
+E.5 Chapter 4: batched self-consistency sampling
+The optional self_consistency_math500_batched.py script for chapter 4 does not mix
+different prompts into one padded tensor. Instead, it repeats the same prompt
+num_samples times and samples several continuations in parallel for self-consistency
+voting, since parallelizing over the different number of samples for each prompt is a natural
+angle here that we can take advantage of.
+Because every row starts from the same prompt length, this script can use the regular
+Qwen3Model from reasoning_from_scratch.qwen3 instead of
+reasoning_from_scratch.qwen3_batched. In other words, the batch dimension here is
+used for multiple sampled rollouts of the same prompt, not for padding together unrelated
+prompts of different lengths.
+We can download the script as shown in listing E.5:
+To download the non-batched version instead, simply remove the "_batched" part from the
+file name in listing E.5.
+We can run the batched script as follows, and the syntax for the non-batched script is
+otherwise the same:
+Listing E.5 Download self-consistently sampling with batch support
+download_from_github(
+"ch04/02_math500-inference-scaling-scripts/"
+"self_consistency_math500_batched.py"
+)
+uv run self_consistency_math500_batched.py \
+--which_model base \
+--temperature 0.9 \
+--top_p 0.9 \
+--num_samples 3 \
+--dataset_size 500 \
+--prompt_suffix "\n\nExplain step by step."
+481
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 486>>>
+
+E.6 Chapter 6: batched GRPO rollouts
+Self-refinement in chapter 5 is fundamentally sequential and therefore does not benefit
+much from simple batching. One could in principle run self-refinement loops for multiple
+inputs in parallel, but that is non-trivial to implement and is therefore not part of the
+supplementary material. Instead, the next batched example appears in the chapter 6 RLVR
+code.
+In chapter 6, we again use the same prompt for multiple rollouts, so no padding is
+required. As in section E.5, the code can therefore stay with the regular Qwen3Model class
+from reasoning_from_scratch.qwen3.
+The relevant scripts can be fetched as follows:
+Similar to before, to download the single-generation script, simply drop "_batched" from
+the file name in listing E.6.
+Here, --batch_size controls how many rollouts are generated in parallel within one
+training step. This improves throughput, but it also increases memory pressure, so in
+practice you may need to reduce --num_rollouts or --max_new_tokens.
+E.7 Chapter 8: batched distillation
+Chapter 8 returns to the padding-aware style from chapter 3 because the distillation
+examples have different prompt and answer lengths. In other words, we are again batching
+unrelated examples of different lengths into a single rectangular tensor, which means that
+masking and padding matter again.
+We can download the batched training script and fetch a sample training dataset as
+follows:
+Listing E.6 Download RLVR script with batch support
+download_from_github(
+"ch06/02_rlvr_grpo_scripts_intro/"
+"rlvr_grpo_original_no_kl_batched.py"
+)
+A typical batched run looks like this:
+uv run rlvr_grpo_original_no_kl_batched.py \
+--num_rollouts 8 \
+--batch_size 4 \
+--max_new_tokens 512
+482
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 487>>>
+
+For the non-batched version, remove the "_batched" part from the file name in listing E.7.
+A representative batched run looks like this:
+Here, --batch_size lets us process multiple distillation examples per optimization step, but
+because training also has to store activations, the resource demands can become much
+higher than in the chapter 3 evaluator. So chapter 8 gives us the training analogue of the
+padding-aware batching strategy introduced earlier in this appendix.
+E.8 Single-sequence versus batch generation
+The supplementary scripts in chapters 3 and 8 batch together different-length examples, so
+they need padding-aware attention masks and more careful bookkeeping. Chapters 4 and 6
+batch repeated copies of the same prompt or rollout setup, so they can stay with the
+regular model implementation and avoid the more complicated padding logic.
+Either way, batched generation can result in higher throughput and shorter runtimes, at
+the cost of increased RAM usage. Table 8.1 compares single to batched generation using
+the settings shown in the previous sections.
+Listing E.7 Download distillation script with batch support
+from reasoning_from_scratch.ch08 import load_distill_data
+download_from_github(
+"ch08/04_train_with_distillation/distill_batched.py"
+)
+_ = load_distill_data(
+partition="deepseek-r1-math-train",
+local_path="deepseek-r1-math-train.json",
+)
+uv run distill_batched.py \
+--data_path deepseek-r1-math-train.json \
+--dataset_size 500 \
+--validation_size 10 \
+--epochs 2 \
+--use_think_tokens \
+--batch_size 32
+483
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 488>>>
+
+Table E.1 RAM usage and runtime comparison
+ Script Batch
+size
+RAM H100
+Total
+time
+DGX
+Spark
+Total
+tim
+1 evaluate_math500.py - 1.8
+GB
+90
+min
+174
+min
+2 evaluate_math500_batched.py 64 23.39
+GB
+16
+min
+108
+min
+      
+3 self_consistency_math500.py - 1.79
+GB
+252
+min
+340
+min
+4 self_consistency_math500_batched.py 3 2.45
+GB
+129
+min
+243
+min
+      
+5 rlvr_grpo_original_no_kl.py - 43.35
+GB
+68
+min
+63
+min
+6 rlvr_grpo_original_no_kl_batched.py 4 44.91
+GB
+19
+min
+23
+min
+      
+7 distill.py - 8.29
+GB
+10
+min
+32
+min
+8 distill_batched.py 4 8.34
+GB
+9 min 28
+min
+As shown in table E.1, the batched variants are always faster than the single-sequence
+variants. In most cases, the difference is very noticeable. One exception is distillation (row
+7 and 8), where batching only yields a modest advantage.
+This could be because the GPU is already well utilized in single-batch mode, and the
+extra overhead in the batched generation due to the additional mask generation is not
+worth it, given the small model size of the Qwen3 6-billion-parameter model.
+484
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 489>>>
+
+Appendix F. Common
+approaches to
+model evaluation
+F.1 Understanding the main evaluation methods for LLMs
+There are four common ways of evaluating trained LLMs in practice: multiple choice ,
+verifiers, leaderboards, and LLM judges, as shown in figure F.1. Research papers, marketing
+materials, technical reports, and model cards (a term for LLM-specific technical reports)
+often include results from two or more of these categories.
+485
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 490>>>
+
+Figure F.1 A mental model of the topics covered in this book with a focus on the two broad evaluation
+categories, benchmark-based evaluation and judgment-based evaluation, covered in this appendix.
+Furthermore, as shown in figure F.1, the four categories introduced here fall into two
+groups: benchmark-based evaluation and judgment-based evaluation.
+Other measures, such as training loss, perplexity , and rewards, are typically used
+internally during model development. (They are covered in the model training chapters.)
+The following subsections provide brief overviews of each method.
+F.2 Evaluating answer-choice accuracy
+We begin with a benchmark‑based method: multiple‑choice question answering.
+Historically, one of the most widely used evaluation methods is multiple-choice
+benchmarks such as MMLU (short for Massive Multitask Language Understanding,
+https://huggingface. co/datasets/ cais/mmlu). An example task from the MMLU dataset is
+shown in figure F.2.
+486
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 491>>>
+
+Figure F.2 Evaluating an LLM on MMLU by comparing its multiple-choice prediction with the correct answer
+from the dataset.
+Figure F.2 shows just a single example from the MMLU dataset. The complete MMLU dataset
+consists of 57 subjects (from high school math to biology) with about 16 thousand multiple-
+choice questions in total, and performance is measured in terms of accuracy (the fraction of
+correctly answered questions), for example 87.5% if 14,000 out of 16,000 questions are
+answered correctly.
+Multiple-choice benchmarks, such as MMLU, test an LLM's knowledge recall in a
+straightforward, quantifiable way similar to standardized tests, many school exams, or
+theoretical driving tests.
+Note that figure F.2 shows a simplified version of multiple-choice evaluation, where the
+model's predicted answer letter is compared directly to the correct one. Two other popular
+methods exist that involve log-probability scoring (log-probabilities are discussed in chapter
+4 in more detail).
+The following subsections illustrate how the MMLU scoring shown in figure F.2 can be
+implemented in code. End-to-end MMLU scripts, including the different scoring variants, will
+be provided as bonus materials in this book's code repository.
+F.2.1 Loading the model
+First, before we can evaluate it on MMLU, we have to load the pre-trained model. The
+following code is identical to listing 3.1 in chapter 3.
+487
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 492>>>
+
+Listing F.1 Loading a pre-trained model
+from pathlib import Path
+import torch
+from reasoning_from_scratch.ch02 import get_device
+from reasoning_from_scratch.qwen3 import (
+download_qwen3_small, Qwen3Tokenizer,
+Qwen3Model, QWEN_CONFIG_06_B
+)
+device = get_device()
+torch.set_float32_matmul_precision("high")  #A
+# device = "cpu"  #B
+WHICH_MODEL = "base"  #C
+if WHICH_MODEL == "base":
+download_qwen3_small(
+kind="base", tokenizer_only=False, out_dir="qwen3"
+)
+tokenizer_path = Path("qwen3") / "tokenizer-base.json"
+model_path = Path("qwen3") / "qwen3-0.6B-base.pth"
+tokenizer = Qwen3Tokenizer(tokenizer_file_path=tokenizer_path)
+elif WHICH_MODEL == "reasoning":
+download_qwen3_small(
+kind="reasoning", tokenizer_only=False, out_dir="qwen3"
+)
+tokenizer_path = Path("qwen3") / "tokenizer-reasoning.json"
+model_path = Path("qwen3") / "qwen3-0.6B-reasoning.pth"
+tokenizer = Qwen3Tokenizer(
+tokenizer_file_path=tokenizer_path,
+apply_chat_template=True,
+add_generation_prompt=True,
+add_thinking=True,
+)
+else:
+raise ValueError(f"Invalid choice: WHICH_MODEL={WHICH_MODEL}")
+model = Qwen3Model(QWEN_CONFIG_06_B)
+model.load_state_dict(torch.load(model_path))
+model.to(device)
+488
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 493>>>
+
+F.2.2 Checking the generated answer letter
+In this section, we implement the simplest and perhaps most intuitive MMLU scoring
+method, which relies on checking whether a generated multiple-choice answer letter
+matches the correct answer. This is similar to what was illustrated earlier in figure F.2.
+For this, we will work with an example from the MMLU dataset:
+Next, we define a function to format the LLM prompts:
+#A Lower precision from "highest" to enable Tensor Cores if applicable
+#B Uncomment this line if you have compatibility issues with your device
+#C Uses the base model, similar to chapter 2, by default
+#D Optionally set to true to enable model compilation
+USE_COMPILE = False  #D
+if USE_COMPILE:
+torch._dynamo.config.allow_unspec_int_on_nn_module = True
+model = torch.compile(model)
+example = {
+"question": (
+"How many ways are there to put 4 distinguishable"
+" balls into 2 indistinguishable boxes?"
+),
+"choices": ["7", "11", "16", "8"],
+"answer": "D",
+}
+Listing F.2 Formatting the LLM prompt
+#A trailing space encourages a single-letter next token
+def format_prompt(example):
+return (
+f"{example['question']}\n"
+f"A. {example['choices'][0]}\n"
+f"B. {example['choices'][1]}\n"
+f"C. {example['choices'][2]}\n"
+f"D. {example['choices'][3]}\n"
+"Answer: " #A
+)
+489
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 494>>>
+
+Let's execute the function on the MMLU example to get an idea of what the formatted LLM
+input looks like:
+The output is:
+The model prompt, as shown above, provides the model with a list of the different answer
+choices and ends with an "Answer: "  text that encourages the model to generate the
+correct answer.
+While it is not strictly necessary, it can sometimes also be helpful to provide additional
+questions along with the correct answers as input, so that the model can observe how it is
+expected to solve the task. (For example, cases where 5 examples are provided are also
+known as 5-shot MMLU.) However, for current generations of LLMs, where even the base
+models are quite capable, this is not required.
+prompt = format_prompt(example)
+print(prompt)
+How many ways are there to put 4 distinguishable balls into 2
+indistinguishable boxes?
+A. 7
+B. 11
+C. 16
+D. 8
+Answer:
+490
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 495>>>
+
+LOADING DIFFERENT MMLU SAMPLES
+You can load examples from the MMLU dataset directly via the datasets library
+(which can be installed via pip install datasets or uv add datasets):
+Above, we used the "high_school_mathematics" subset; to get a list of the other
+subsets, use the following code:
+Next, we tokenize the prompt and wrap it in a PyTorch tensor object as input to the LLM
+(similar to what we did in chapter 2):
+Then, we define the main scoring function in listing F.3, which generates a few tokens
+(here, 8 tokens by default) and extracts the first instance of letter A/B/C/D that the model
+prints.
+#A Inspect the first example from the test set
+from datasets import load_dataset
+configs = get_dataset_config_names("cais/mmlu")
+dataset = load_dataset("cais/mmlu", "high_school_mathematics")
+example = dataset["test"][0]  #A
+print(example)from datasets import get_dataset_config_names
+subsets = get_dataset_config_names("cais/mmlu")
+print(subsets)
+prompt_ids = tokenizer.encode(prompt)
+prompt_fmt = torch.tensor(prompt_ids, device=device).unsqueeze(0)
+491
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 496>>>
+
+We can then check the generated letter using the function from listing F.3 as follows:
+The result is:
+As we can see, the generated answer is incorrect (False) in this case.
+Listing F.3 Extracting the generated letter
+#A stop as soon as a letter appears
+from reasoning_from_scratch.ch02 import (
+generate_text_basic_stream_cache
+)
+def predict_choice(
+model, tokenizer, prompt_fmt, max_new_tokens=8
+):
+pred = None
+for t in generate_text_basic_stream_cache(
+model=model,
+token_ids=prompt_fmt,
+max_new_tokens=max_new_tokens,
+eos_token_id=tokenizer.eos_token_id,
+):
+answer = tokenizer.decode(t.squeeze(0).tolist())
+for letter in answer:
+letter = letter.upper()
+if letter in "ABCD":  #A
+pred = letter
+break
+if pred:
+break
+return pred
+pred1 = predict_choice(model, tokenizer, prompt_fmt)
+print(
+f"Generated letter: {pred1}\n"
+f"Correct? {pred1 == example['answer']}"
+)
+Generated letter: C
+Correct? False
+492
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 497>>>
+
+MULTIPLE-CHOICE ANSWER FORMATS
+Note that this section implemented a simplified version of multiple-choice evaluation
+for illustration purposes, where the model's predicted answer letter is compared
+directly to the correct one. In practice, more widely used variations exist, such as
+log-probability scoring, where we measure how likely the model considers each
+candidate answer rather than just checking the final letter choice. (We discuss
+probability-based scoring in chapter 4.) For reasoning models, evaluation can also
+involve assessing the likelihood of generating the correct answer when it is provided
+as input.
+Regardless of the variant, the evaluation still amounts to checking whether the
+model selects from the predefined answer options. Examples of these variations will
+be included in the code repository as optional bonus material.
+A limitation of multiple‑choice benchmarks like MMLU is that they only measure an LLM's
+ability to select from predefined options and thus is not very useful for evaluating reasoning
+capabilities besides checking if and how much knowledge the model has forgotten
+compared to the base model. It does not capture free-form writing ability or real-world
+utility. Still, it remains a simple and useful diagnostic: a high MMLU score doesn't
+necessarily mean the model is strong in practical use, but a low score can highlight
+potential knowledge gaps.
+F.3 Using verifiers to check answers
+Related to multiple-choice question answering discussed in the previous section,
+verification-based approaches quantify the LLMs capabilities via an accuracy metric.
+However, in contrast to multiple-choice benchmarks, verification methods allow LLMs to
+provide a free-form answer. We then extract the relevant answer portion and use a so-
+called verifier to compare the answer portion to the correct answer provided in the dataset,
+as illustrated in figure F.3.
+493
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 498>>>
+
+Figure F.3 Evaluating an LLM with a verification-based method in free-form question answering. The model
+generates a free-form answer (which may include multiple steps) and a final boxed answer, which is extracted
+and compared against the correct answer from the dataset.
+When we compare the extracted answer with the provided answer, as shown in figure F.3,
+we can employ external tools, such as code interpreters or calculator software.
+The downside is that this method can only be applied to domains that can be easily (and
+ideally deterministically) verified, such as math and code. Also, this approach can introduce
+additional complexity and dependencies, and it may shift part of the evaluation burden
+from the model itself to the external tool.
+However, because it allows us to generate an unlimited number of math problem
+variations programmatically and benefits from step-by-step reasoning, it has become a
+cornerstone of reasoning model evaluation and development.
+494
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 499>>>
+
+An extensive example of this method is provided in chapter 3, which is why we skip a
+code demonstration here.
+F.4 Comparing models using preferences and leaderboards
+So far, we have covered two methods that offer easily quantifiable metrics such as model
+accuracy. However, none of the aforementioned methods evaluate LLMs in a more holistic
+way, including judging the style of the responses. In this section, as illustrated in figure F.4,
+we discuss a judgment-based method, namely, LLM leaderboards.
+Figure F.4 A mental model of the topics covered in this book with a focus on the judgment- and benchmark-
+based evaluation methods covered in this appendix. Having already covered benchmark-based approaches
+(multiple choice, verifiers) in the previous section, we now introduce judgment-based approaches to measure
+LLM performance, with this subsection focusing on leaderboards.
+The leaderboard method mentioned in figure F.4 is a judgment-based approach where
+models are ranked not by accuracy values or other fixed benchmark scores but by user (or
+other LLM) preferences on their outputs.
+A popular leaderboard is LM Arena (formerly Chatbot Arena, 
+https://lmarena. ai/), where
+users compare responses from two user-selected or anonymous models and vote for the
+one they prefer, as shown in figure F.5.
+495
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 500>>>
+
+Figure F.5 Example of a judgment-based leaderboard interface (LM Arena). Two LLMs are given the same
+prompt, their responses are shown side by side, and users vote for the preferred answer.
+These preference votes, which are collected as shown in figure F.5, are then aggregated
+across all users into a leaderboard that ranks different models by user preference. In the
+remainder of this section, we will implement a simple example of a leaderboard.
+To create a concrete example, consider users prompting different LLMs in a setup similar
+to figure F.5. The list below represents pairwise votes where the first model is the winner:
+votes = [
+("GPT-5", "Claude-3"),
+("GPT-5", "Llama-4"),
+("Claude-3", "Llama-3"),
+("Llama-4", "Llama-3"),
+("Claude-3", "Llama-3"),
+("GPT-5", "Llama-3"),
+]
+496
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 501>>>
+
+In the list above, each tuple in the votes list represents a pairwise preference between two
+models, written as (winner, loser) . So, ("GPT-5", "Claude-3")  means that a user
+preferred GPT-5 over a Claude-3 model answer.
+In the remainder of this section, we will turn the votes list into a leaderboard. For this,
+we will use the popular Elo rating system, which was originally developed for ranking chess
+players. Before we look at the concrete code implementation, in short, it works as follows.
+Each model starts with a baseline score. Then, after each comparison and the preference
+vote, the model’s rating is updated. Specifically, if a user prefers a current model over a
+highly ranked model, the current model will get a relatively large ranking update and rank
+higher in the leaderboard. Vice versa, if the current model wins against a lowly ranked
+model, it increases the rating only a little. (And if the current model loses, it is updated in a
+similar fashion, but with ranking points getting subtracted instead of added.)
+The code to turn these pairwise rankings into a leaderboard is shown in listing F.4.
+Listing F.4 Constructing a leaderboard
+#A Initialize all models with the same base rating
+#B Update ratings after each match
+#C Expected score for the current winner given the ratings
+#D k_factor determines sensitivity of rating updates
+def elo_ratings(vote_pairs, k_factor=32, initial_rating=1000):
+ratings = {  #A
+model: initial_rating
+for pair in vote_pairs
+for model in pair
+}
+for winner, loser in vote_pairs:  #B
+rating_winner, rating_loser = ratings[winner], ratings[loser]
+expected_winner = 1.0 / (  #C
+1.0 + 10 ** ((ratings[loser] - ratings[winner]) / 400.0)
+)
+ratings[winner] = (  #D
+ratings[winner] + k_factor * (1 - expected_winner)
+)
+ratings[loser] = (
+ratings[loser] + k_factor * (0 - (1 - expected_winner))
+)
+return ratings
+497
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 502>>>
+
+The elo_ratings function in listing F.4 takes the votes as input and turns it into a
+leaderboard, as follows:
+This results in the following leaderboard ranking, where the higher the score, the better:
+So, how does this work? For each pair, we compute the expected score of the winner using
+the following formula:
+This value expected_winner is the model's predicted chance to win in a no-draw setting
+based on the current ratings. It determines how large the rating update is.
+First, each model starts at initial_rating = 1000 . If the two ratings (winner and
+loser) are equal, we have expected_winner = 0.5, which indicates an even match. In this
+case, the updates are:
+Now, if a heavy favorite (a model with a high rating) wins, we have expected_winner ≈ 1.
+The favorite gains only a small amount and the loser loses only a little:
+However, if an underdog (a model with a low rating) wins, we have expected_winner ≈ 0,
+and the winner gets almost the full k_factor points while the loser loses about the same
+magnitude:
+ratings = elo_ratings(votes, k_factor=32, initial_rating=1000)
+for model in sorted(ratings, key=ratings.get, reverse=True):
+print(f"{model:8s} : {ratings[model]:.1f}")
+GPT-5    : 1043.7
+Claude-3 : 1015.2
+Llama-4  : 1000.7
+Llama-3  : 940.4
+expected_winner = 1 / (1 + 10 ** ((rating_loser - rating_winner) / 400))
+rating_winner + k_factor * (1 - 0.5) = rating_winner + 16
+rating_loser  + k_factor * (0 - (1 - 0.5)) = rating_loser - 16
+rating_winner + 32 * (1 - 0.99) = rating_winner + 0.32
+rating_loser  + 32 * (0 - (1 - 0.99)) = rating_loser - 0.32
+rating_winner + 32 * (1 - 0.01) = rating_winner + 31.68
+rating_loser  + 32 * (0 - (1 - 0.01)) = rating_loser - 31.68
+498
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 503>>>
+
+ORDER MATTERS
+The Elo approach updates ratings after each match (model comparisons), so later
+results build on ratings that have already been updated. This means the same set of
+outcomes, when presented in a different order, can end with slightly different final
+scores. This effect is usually mild, but it can happen especially when an upset
+happens early versus late.
+To reduce this order effect, we can shuffle the votes pairs and run the
+elo_ratings function multiple times and average the ratings.
+Leaderboard approaches such as the one described above provide a more dynamic view of
+model quality than static benchmark scores. However, the results can be influenced by user
+demographics, prompt selection, and voting biases. Benchmarks and leaderboards can also
+be gamed, and users may select responses based on style rather than correctness. Finally,
+compared to automated benchmark harnesses, leaderboards do not provide instant
+feedback on newly developed variants, which makes them harder to use during active
+model development.
+OTHER RANKING METHODS
+The LM Arena originally used the Elo method described in this section but recently
+transitioned to a statistical approach based on the Bradley–Terry model. The main
+advantage of the Bradley–Terry model is that, being statistically grounded, it allows
+the construction of confidence intervals to express uncertainty in the rankings. Also,
+in contrast to the Elo ratings, the Bradley–Terry model estimates all ratings jointly
+using a statistical fit over the entire dataset, which makes it immune to order effects.
+To keep the reported scores in a familiar range, the Bradley–Terry model is fitted
+to produce values comparable to Elo. Even though the leaderboard no longer
+officially uses Elo ratings, the term "Elo" remains widely used by LLM researchers
+and practitioners when comparing models. A code example showing the Elo rating is
+included in this book's bonus materials at 
+https://github. com/rasbt/ reasoning- from-
+scratch/ tree/main/ chF/03_leaderboards.
+499
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 504>>>
+
+F.5 Judging responses with other LLMs
+In the early days, LLMs were evaluated using statistical and heuristics-based methods,
+including a measure called BLEU, which is a crude measure of how well generated text
+matches reference text. The problem with such metrics is that they require exact word
+matches and don't account for synonyms, word changes, and so on.
+One solution to this problem, if we want to judge the written answer text as a whole, is
+to use relative rankings and leaderboard-based approaches as discussed in the previous
+section. However, a downside of leaderboards is the subjective nature of the preference-
+based comparisons as it involves human feedback (as well as the challenges that are
+associated with collecting this feedback).
+A related method is to use another LLM with a pre-defined grading rubric (i.e., an
+evaluation guide) to compare an LLM's response to a reference response and judge the
+response quality based on a pre-defined rubric, as illustrated in figure F.6.
+Figure F.6 Example of an LLM-judge evaluation. The model to be evaluated generates an answer, which is then
+scored by a separate judge LLM according to a rubric and a provided reference answer.
+500
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 505>>>
+
+In practice, the judge-based approach shown in figure F.6 works well when the judge LLM is
+strong. Common setups use leading proprietary LLMs via API, though specialized judge
+models also exist (see appendix A for references). One of the reasons why judges work so
+well is also that evaluating an answer is often easier than generating one.
+To implement a judge-based model evaluation as shown in figure F.6 programmatically in
+Python, we could either load one of the Qwen3 models (appendix D) and prompt it with a
+grading rubric and the model answer we want to evaluate.
+Alternatively, we can use other LLMs through an API, for example the ChatGPT or Ollama
+API. In the remainder of the section, we will implement the judge-based evaluation shown
+in figure F.6 using the Ollama API in Python.
+Specifically, we will use the 20-billion parameter gpt-oss open-weight model by OpenAI
+as it offers a good balance between capabilities and efficiency. For more information about
+gpt-oss, please see my From GPT-2 to gpt-oss: Analyzing the Architectural Advances article
+at https://magazine. sebastianraschka. com/p/from- gpt-2-to- gpt-oss-analyzing- the.
+F.5.1 Implementing a LLM-as-a-judge approach in Ollama
+Ollama (https://ollama. com) is an efficient open-source application for running LLMs on a
+laptop. It serves as a wrapper around the open-source llama.cpp library ( https://github. 
+com/ggerganov/ llama.cpp), which implements LLMs in pure C/C++ to maximize efficiency.
+However, note that Ollama is only a tool for generating text using LLMs (inference) and
+does not support training or fine-tuning LLMs.
+To execute the following code, please install Ollama by visiting https://ollama. com and
+follow the provided instructions for your operating system:
+For macOS and Windows users: Open the downloaded Ollama application.
+If prompted to install command-line usage, select "yes."    
+For Linux users: Use the installation command available on the Ollama
+website.
+    
+Before implementing the model evaluation code, let's first download the gpt-oss model and
+verify that Ollama is functioning correctly by using it from the command line terminal.
+Execute the following command on the command line (not in a Python session) to try out
+the 20 billion parameter gpt-oss model:
+The first time you execute this command, the 20 billion parameter gpt-oss model, which
+takes up 14 GB of storage space, will be automatically downloaded. The output looks as
+follows:
+ollama run gpt-oss:20b
+501
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 506>>>
+
+ALTERNATIVE OLLAMA MODELS
+Note that the gpt-oss:20b in the ollama run gpt-oss:20b command refers to the
+20 billion parameter gpt-oss model. Using Ollama with the gpt-oss:20b model
+requires approximately 13 GB of RAM. If your machine does not have sufficient RAM,
+you can try using a smaller model, such as the 4 billion parameter qwen3:4b model
+via ollama run qwen3:4b, which only requires around 4 GB of RAM.
+For more powerful computers, you can also use the larger 120-billion parameter
+gpt-oss model by replacing gpt-oss:20b with gpt-oss:120b. However, keep in mind
+that this model requires significantly more computational resources.
+Once the model download is complete, we are presented with a command-line interface
+that allows us to interact with the model. For example, try asking the model, "What is
+1+2?":
+You can end this ollama run gpt-oss:20b session using the input /bye.
+$ ollama run gpt-oss:20b
+pulling manifest 
+pulling b112e727c6f1: 100% ▕██████████████████████▏  13 GB
+pulling fa6710a93d78: 100% ▕██████████████████████▏ 7.2 KB
+pulling f60356777647: 100% ▕██████████████████████▏  11 KB
+pulling d8ba2f9a17b3: 100% ▕██████████████████████▏   18 B
+pulling 55c108d8e936: 100% ▕██████████████████████▏  489 B
+verifying sha256 digest 
+writing manifest 
+removing unused layers 
+success
+>>> What is 1+2?
+Thinking...
+User asks: "What is 1+2?" This is simple: answer 3. Provide explanation? Possibly
+ask for simple 
+arithmetic. Provide answer: 3.
+...done thinking.
+1 + 2 = **3**
+502
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 507>>>
+
+In the remainder of this section, we will use the ollama API. This approach requires that
+Ollama is running in the background. There are three different options to achieve this:
+1. Run the ollama serve command in the terminal (recommended). This runs the Ollama
+backend as a server, usually on http://localhost:11434. Note that it doesn’t load a
+model until it's called through the API (later in this section).
+2. Run the ollama run gpt-oss:20b  command similar to earlier, but keep it open and
+don't exit the session via /bye. As discussed earlier, this opens a minimal convenience
+wrapper around a local Ollama server. Behind the scenes, it uses the same server API as
+ollama serve.
+3. Ollama desktop app. Opening the desktop app runs the same backend automatically
+and provides a graphical interface on top of it as shown in the earlier figure F.6.
+OLLAMA SERVER IP ADDRESS
+Ollama runs locally on our machine by starting a local server-like process. When
+running ollama serve in the terminal, as described above, you may encounter an
+error message saying Error: listen tcp 127.0.0.1:11434: bind: address
+already in use.
+If that's the case, try use the command OLLAMA_HOST=127.0.0.1:11435 ollama
+serve (and if this address is also in use, try to increment the numbers by one until
+you find an address not in use.)
+The following code verifies that the Ollama session is running properly before we use
+Ollama to evaluate the test set responses generated in the previous section:
+503
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 508>>>
+
+Ensure that the output from executing the previous code displays Ollama running: True.
+If it shows False, please verify that the ollama serve command or the Ollama application
+is actively running.
+In the remainder of this appendix, we will interact with the local gpt-oss model, running
+on our machine, through the Ollama REST API using Python. The following query_model
+function demonstrates how to use the API:
+Listing F.5 Checking Ollama is running
+import psutil
+def check_if_running(process_name):
+running = False
+for proc in psutil.process_iter(["name"]):
+if process_name in proc.info["name"]:
+running = True
+break
+return running
+ollama_running = check_if_running("ollama")
+if not ollama_running:
+raise RuntimeError(
+"Ollama not running. Launch ollama before proceeding."
+)
+print("Ollama running:", check_if_running("ollama"))
+504
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 509>>>
+
+Listing F.6 Querying a local Ollama model
+import json
+import requests
+def query_model(
+prompt,
+model="gpt-oss:20b",
+url="http://localhost:11434/api/chat"  #A
+):
+data = {  #B
+"model": model,
+"messages": [
+{"role": "user", "content": prompt}
+],
+"options": {  #C
+"seed": 123,
+"temperature": 0,
+"num_ctx": 2048
+}
+}
+#D
+with requests.post(url, json=data, stream=True, timeout=30) as r:  
+r.raise_for_status()  #E
+response_data = ""
+for line in r.iter_lines(decode_unicode=True):  #F
+if not line:
+continue
+response_json = json.loads(line)  #G
+if "message" in response_json:  #H
+response_data += response_json["message"]["content"]
+return response_data
+return response_data
+505
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 510>>>
+
+Here's an example of how to use the query_model function from listing F.6 that we just
+implemented:
+The resulting response is "3". (It differs from what we'd get if we ran Ollama run or the
+Ollama application due to different default settings.)
+Using the query_model function, we can evaluate the responses generated by our model
+with a prompt that includes a grading rubric asking the gpt-oss model to rate our target
+model's responses on a scale from 1 to 5 based on a correct answer as a reference.
+The prompt we use for this is shown in listing F7:
+#A If you used OLLAMA_HOST=127.0.0.1:11435 ollama serve, update the address 
+#B Create the data payload as a dictionary
+#C Settings required for deterministic responses
+#D Send the POST request with a JSON payload and open a streaming response
+#E Raise an error if the server response indicates failure
+#F Iterate over each streamed line from the response
+#G Parse each line into JSON format
+#H Extract and accumulate the message content from the response
+ollama_model = "gpt-oss:20b"
+result = query_model("What is 1+2?", ollama_model)
+print(result)
+506
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 511>>>
+
+The model_answer in the rubric_prompt is intended to represent the response produced
+by our own model in practice. For illustration purposes, we hardcode a plausible model
+answer here rather than generating it dynamically. (However, feel free to use the Qwen3
+model we loaded in section F.2.1 to generate a real model_answer).
+Next, let's generate the rendered prompt for the Ollama model:
+Listing F.7 Setting up the prompt template including grading rubric
+def rubric_prompt(instruction, reference_answer, model_answer):
+rubric = (
+"You are a fair judge assistant. You will be given an instruction, "
+"a reference answer, and a candidate answer to evaluate, according "
+"to the following rubric:\n\n"
+"1: The response fails to address the instruction, providing "
+"irrelevant, incorrect, or excessively verbose content.\n"
+"2: The response partially addresses the instruction but contains "
+"major errors, omissions, or irrelevant details.\n"
+"3: The response addresses the instruction to some degree but is "
+"incomplete, partially correct, or unclear in places.\n"
+"4: The response mostly adheres to the instruction, with only "
+"minor errors, omissions, or lack of clarity.\n"
+"5: The response fully adheres to the instruction, providing a "
+"clear, accurate, and relevant answer in a concise and efficient "
+"manner.\n\n"
+"Now here is the instruction, the reference answer, and the "
+"response.\n"
+)
+prompt = (
+f"{rubric}\n"
+f"Instruction:\n{instruction}\n\n"
+f"Reference Answer:\n{reference_answer}\n\n"
+f"Answer:\n{model_answer}\n\n"
+f"Evaluation: "
+)
+return prompt
+507
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 512>>>
+
+The output is as follows:
+rendered_prompt = rubric_prompt(
+instruction=(
+"If all birds can fly, and a penguin is a bird, "
+"can a penguin fly?"
+),
+reference_answer=(
+"Yes, according to the premise that all birds can fly, "
+"a penguin can fly."
+),
+model_answer=(
+"Yes – under those premises a penguin would be able to fly."
+)
+)
+print(rendered_prompt)
+508
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 513>>>
+
+Ending the prompt in "Evaluation: " incentivizes the model to generate the answer. Let's
+see how the gpt-oss:20b model judges the response:
+The response is as follows:
+You are a fair judge assistant. You will be given an instruction, a
+reference answer, and a candidate answer to evaluate, according to the
+following rubric:
+1: The response fails to address the instruction, providing irrelevant,
+incorrect, or excessively verbose content.
+2: The response partially addresses the instruction but contains major
+errors, omissions, or irrelevant details.
+3: The response addresses the instruction to some degree but is
+incomplete, partially correct, or unclear in places.
+4: The response mostly adheres to the instruction, with only minor
+errors, omissions, or lack of clarity.
+5: The response fully adheres to the instruction, providing a clear,
+accurate, and relevant answer in a concise and efficient manner.
+Now here is the instruction, the reference answer, and the response.
+Instruction:
+If all birds can fly, and a penguin is a bird, can a penguin fly?
+Reference Answer:
+Yes, according to the premise that all birds can fly, a penguin can
+fly.
+Answer:
+Yes – under those premises a penguin would be able to fly.
+Evaluation: 
+result = query_model(rendered_prompt, ollama_model)
+print(result)
+**Score: 5**
+The candidate answer directly addresses the question, correctly applies the given
+premises, and concisely states that a penguin would be able to fly. It is
+accurate, relevant, and clear.
+509
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 514>>>
+
+As we can see, the answer receives the highest score, which is reasonable, as it is indeed
+correct. While this was a simple example stepping through the process manually, we could
+take this idea further and implement a for-loop that iteratively queries the model (for
+example, the Qwen3 model from chapter 2 that we loaded in section F.2.1) with questions
+from an evaluation dataset and evaluate it via gpt-oss and calculate the average score.
+Then, doing this for two models (for example, the Qwen3 base and reasoning model), we
+can compare the models relative to each other.
+SCORING INTERMEDIATE REASONING STEPS WITH PROCESS REWARD MODELS
+Related to symbolic verifiers and LLM judges, there is a class of learned models
+called process reward models (PRMs). Like judges, PRMs can evaluate reasoning
+traces beyond just the final answer, but unlike general judges, they focus specifically
+on the intermediate steps of reasoning. And unlike verifiers, which check correctness
+symbolically and usually only at the outcome level, PRMs provide step-by-step
+reward signals during training in reinforcement learning. We can categorize PRMs as
+"step-level judges," which are predominantly developed for training, not pure
+evaluation. (In practice, PRMs are difficult to train reliably at scale. For example,
+DeepSeek R1 did not adopt PRMs and instead combined verifiers for the reasoning
+training.)
+Judge-based evaluations offer advantages over preference-based leaderboards, including
+scalability and consistency, as they do not rely on large pools of human voters. (Technically,
+it is possible to outsource the preference-based rating behind leaderboards to LLM judges
+as well). However, LLM judges also share similar weaknesses with human voters: results
+can be biased by model preferences, prompt design, and answer style. Also, there is a
+strong dependency on the choice of judge model and rubric, and they lack the
+reproducibility of fixed benchmarks.
+510
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 515>>>
+
+Appendix G. Building
+a chat interface
+The supplementary code repository for this book includes a small browser-based chat
+interface built with the open-source Chainlit Python package ( https://github. com/Chainlit/ 
+chainlit) to interact with the various LLMs and reasoning models in this book via a ChatGPT-
+like interface, as shown in the screenshot in figure G.1.
+511
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 516>>>
+
+Figure G.1 Chainlit interface for the Qwen3 model, which mimics the ChatGPT interface.
+This interface shown in figure G.1 can be useful when we want a more convenient way to
+interact with the models than typing prompts into a notebook cell or terminal.
+Building upon the Chainlit library, the implementation is relatively straightforward.
+Instead of printing tokens to the terminal, we wrap the same model loading and generation
+functions from the earlier chapters inside a small web application, which stays local on our
+computer and runs in our browser.
+In practice, this means that we can reuse the from-scratch Qwen3Model implementation
+and the chapter 2 streaming helper while letting Chainlit handle the browser UI and
+message events.
+The supplementary materials contain two variants in chG/01_main-chapter-code
+(https://github. com/rasbt/ reasoning- from-scratch/ tree/main/ chG/01_main- chapter-code):
+qwen3_chat_interface.py, which is a single-turn interface;    
+qwen3_chat_interface_multiturn.py, which stores conversation history
+and supports multi-turn interactions.    
+In this appendix, we will walk through both versions. We will also discuss how to install
+Chainlit, how to download the scripts via the download_from_github helper from chapter 7.
+512
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 517>>>
+
+G.1 Installing Chainlit
+Before running the chat interface, we first need to install Chainlit. The simplest option is:
+If you are using uv, the equivalent command is:
+If you are working directly inside the reasoning-from-scratch repository, Chainlit is also
+listed as an optional dependency in the project's pyproject.toml. In that case, a
+convenient alternative is:
+or:
+G.2 Running the code as a script
+Chainlit runs ordinary Python scripts. This is important because Chainlit imports the script
+as a module and looks for special functions decorated with @chainlit.on_chat_start and
+@chainlit.on_message as we will see later.
+This means that if we want to reuse the code shown in this appendix, we should place it
+into a .py file such as:
+or:
+and then launch it from the terminal via:
+Or, if you are using uv, this command becomes:
+pip install chainlit
+uv add chainlit
+uv sync --extra extra
+pip install -e ".[extra]"
+qwen3_chat_interface.py
+app.py
+chainlit run app.py
+513
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 518>>>
+
+In other words, while we can inspect the code in a notebook, the actual Chainlit application
+is expected to live in a standalone Python script.
+G.3 Downloading the scripts
+If you cloned the repository, the files are already present in chG/01_main-chapter-code
+and you can skip this step. Otherwise, as discussed in chapter 7, we can use
+download_from_github(...) to fetch the two scripts:
+G.4 The regular single-turn script
+The regular single-turn version in qwen3_chat_interface.py is intentionally compact. It
+reuses the earlier chapter code almost directly and wraps it in the minimum amount of
+Chainlit-specific logic.
+Here, "single-turn" means that we can still submit multiple queries, but each query is
+independent of each other and doesn't know about the previous query.
+The code, which is relatively short, is shown in its entirety in listing G2.
+uv run chainlit run app.py
+Listing G.1 Download Chainlit scripts
+from reasoning_from_scratch.ch07 import download_from_github
+download_from_github(
+"chG/01_main-chapter-code/qwen3_chat_interface.py"
+)
+download_from_github(
+"chG/01_main-chapter-code/qwen3_chat_interface_multiturn.py"
+)
+514
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 519>>>
+
+Listing G.2 Chainlit script for single-turn queries
+import os
+from pathlib import Path
+import torch
+import chainlit
+from reasoning_from_scratch.ch02 import (
+get_device,
+)
+from reasoning_from_scratch.ch02 import generate_text_basic_stream_cache
+from reasoning_from_scratch.ch03 import (
+load_model_and_tokenizer,
+load_tokenizer_only
+)
+from reasoning_from_scratch.qwen3 import Qwen3Model, QWEN_CONFIG_06_B
+#A
+WHICH_MODEL = "reasoning"  #B
+MAX_NEW_TOKENS = 38912
+LOCAL_DIR = "qwen3"
+CHECKPOINT_PATH = os.getenv("CHECKPOINT_PATH")
+COMPILE = False
+DEVICE = get_device()
+def load_app_model_and_tokenizer():
+if CHECKPOINT_PATH is None:
+return load_model_and_tokenizer(
+which_model=WHICH_MODEL,
+device=DEVICE,
+use_compile=COMPILE,
+local_dir=LOCAL_DIR,
+)
+checkpoint_path = Path(CHECKPOINT_PATH)  #C
+if not checkpoint_path.exists():
+raise FileNotFoundError(
+f"Checkpoint file not found: {checkpoint_path}"
+)
+515
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 520>>>
+
+tokenizer = load_tokenizer_only(
+which_model=WHICH_MODEL, local_dir=LOCAL_DIR
+)
+model = Qwen3Model(QWEN_CONFIG_06_B)
+model.load_state_dict(
+torch.load(checkpoint_path, map_location="cpu")
+)
+model.to(DEVICE)
+if COMPILE:
+torch._dynamo.config.allow_unspec_int_on_nn_module = True
+model = torch.compile(model)
+return model, tokenizer
+MODEL, TOKENIZER = load_app_model_and_tokenizer()
+EOS_TOKEN_IDS = (
+TOKENIZER.encode("<|im_end|>")[0],
+TOKENIZER.encode("<|endoftext|>")[0]
+)
+#D
+@chainlit.on_chat_start
+async def on_start():
+chainlit.user_session.set("history", [])
+chainlit.user_session.get("history").append(
+{"role": "system", "content": "You are a helpful assistant."}
+)
+#E
+@chainlit.on_message
+async def main(message: chainlit.Message):
+#F
+input_ids = TOKENIZER.encode(message.content)
+input_ids_tensor = torch.tensor(input_ids, device=DEVICE).unsqueeze(0)
+#G
+out_msg = chainlit.Message(content="")
+await out_msg.send()
+#H
+516
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 521>>>
+
+The CHECKPOINT_PATH environment variable in listing G.2 optional. If it is set, the script
+loads that custom .pth checkpoint instead of the default official weights. The
+load_app_model_and_tokenizer() helper handles these two cases. If no custom
+checkpoint is provided, it delegates to load_model_and_tokenizer(...) from chapter 3. If
+a custom checkpoint path is provided, it loads only the tokenizer via
+load_tokenizer_only(...), constructs a fresh Qwen3Model(QWEN_CONFIG_06_B), and then
+loads in the weight with the custom state dictionary.
+This is useful because it means the single-turn Chainlit interface can also be used to
+inspect chapter 6, 7, or 8 checkpoints interactively, provided that the tokenizer setting
+remains aligned with the checkpoint. The next section will explain how exactly the custom
+checkpoint can be provided as input from the command line terminal.
+The @chainlit.on_chat_start function initializes a history object and inserts a default
+system message, which is a common convention:
+However, the single-turn script does not actually use that stored history when generating
+the response. Inside main(...), the prompt is built only from the current
+message.content:
+#A Configuration section
+#B Change to "base" for base model
+#C Optionally load trained checkpoint from chapter 7 or 8
+#D Initialize per-session state and seed it with a default system prompt
+#E Handle one user message and stream the model response into the Chainlit UI
+#F 1) Encode input
+#G 2) Start an outgoing message we can stream into
+#H 3) Stream generation
+#I 4) Finalize the streamed message
+for tok in generate_text_basic_stream_cache(
+model=MODEL,
+token_ids=input_ids_tensor,
+max_new_tokens=MAX_NEW_TOKENS,
+):
+token_id = tok.squeeze(0).item()
+if token_id in EOS_TOKEN_IDS:
+break
+piece = TOKENIZER.decode([token_id])
+await out_msg.stream_token(piece)
+#I
+await out_msg.update()
+{"role": "system", "content": "You are a helpful assistant."}
+517
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 522>>>
+
+So even though the browser UI looks like a chat application, the regular version behaves
+more like a prompt box that happens to show earlier messages visually without the model
+actually remembering earlier conversations. In other words, the model itself only sees the
+current user message and treats each turn independently.
+The rest of the generation logic is very similar to what we already used in chapter 2.
+G.5 Running the single-turn script
+If we are inside the supplementary code repository, the most convenient command to
+launch the user interface is usually:
+If we saved the code under another filename such as app.py, we would simply replace the
+path accordingly:
+After launching the server, Chainlit usually opens a browser tab automatically. If not, we
+can copy the local address shown in the terminal into the browser manually. Typically this is
+http://localhost:8000.
+Figure G.2 shows an example output in the Chainlit interface.
+input_ids = TOKENIZER.encode(message.content)
+uv run chainlit run chG/01_main-chapter-code/qwen3_chat_interface.py
+uv run chainlit run app.py
+518
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 523>>>
+
+Figure G.2 Example response in the Chainlit interface.
+By default, the script initializes the Qwen3 reasoning variant we briefly introduced in
+chapter 3, which provided the response shown in figure G.2. To run the same script with a
+custom checkpoint, we pass the path via the CHECKPOINT_PATH environment variable. For
+example:
+When doing so, WHICH_MODEL must remain aligned with the tokenizer expected by the
+checkpoint. The chapter 8 distillation checkpoints use the reasoning tokenizer, so in that
+case we should keep WHICH_MODEL = "reasoning" . For chapters 6 checkpoints, for
+example, we change it to WHICH_MODEL = "base".
+Editing the configuration directly in the script may seem a bit cumbersome. The reason
+for this, over using command line arguments is that Chainlit itself launches and manages
+the application entry point via chainlit run ..., and as a result, the script does not
+behave like a normal standalone Python program where we can freely define and parse
+custom command-line arguments with the Python argparse library, for example. For simple
+options such as model choice, generation length, or checkpoint paths, it is therefore more
+convenient to keep the settings in the script or pass them via environment variables.
+CHECKPOINT_PATH=path/to/qwen3-0.6B-distill-step06682-epoch1.pth \
+uv run chainlit run chG/01_main-chapter-code/qwen3_chat_interface.py
+519
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 524>>>
+
+DOWNLOADING MODEL CHECKPOINTS
+If you want to explore some of the model checkpoints from chapters 6, 7, or 8 but
+don't have the compute capacity to train them yourself, you can find information on
+how to download these in the supplementary materials at https://github. com/rasbt/ 
+reasoning- from-scratch/ tree/main/ ch07/04_download_ trainining_ checkpoints and
+https://github. com/rasbt/ reasoning- from-scratch/ tree/main/ ch08/05_download_ 
+training_ checkpoints.
+G.6 The multi-turn interface
+The second script, qwen3_chat_interface_multiturn.py, extends the basic Chainlit
+interface so that the model can condition on earlier turns in the same conversation. The
+following subsections explain what multi-turn means in practice, how the script implements
+it, and when it is appropriate to use.
+G.6.1 What multi-turn means
+In a single-turn setup, the model only sees the current input. For illustration purposes,
+suppose the interaction is:
+In the regular single-turn script, when the model receives the second message,  "What did
+I just ask?", it might respond with "I don't know what you are asking" . The reason
+is that the earlier question and answer are visible in the browser, but they are not included
+in the model input. So the model does not truly have conversation memory.
+In a multi-turn setup (qwen3_chat_interface_multiturn.py), we explicitly include (or,
+more specifically, prepend) the earlier messages in the prompt similar to what ChatGPT and
+other chat assistants do. So, in this case, the model might answer the question "What did
+I just ask?" with "You asked me what 1+1 is".
+G.6.2 The multi-turn variant
+The multi-turn script begins in the same way as the regular version, but the main difference
+is that it adds two helper functions and then actually uses the stored session history during
+generation.
+The first helper, shown in listing G.2, turns the stored message history into the Qwen
+chat format we require here.
+User: What is 1 + 1?
+Assistant: 2
+User: What did I just ask?
+520
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 525>>>
+
+The build_prompt_from_history function in listing G.3 serializes the message list into the
+chat-template style that the Qwen reasoning model expects. Conceptually, the resulting
+prompt looks like this:
+The model then continues generating from that final assistant header.
+The second helper trims the messages, shown in listing G.3, is needed to trim the
+messages if they exceed the context length, since multi-turn conversations can grow very
+long.
+Listing G.3 Building a prompt from conversation history
+def build_prompt_from_history(history, add_assistant_header=True):
+parts = []
+for m in history:
+role = m["role"]
+content = m["content"]
+parts.append(f"<|im_start|>{role}\n{content}<|im_end|>\n")
+if add_assistant_header:
+parts.append("<|im_start|>assistant\n")
+return "".join(parts)
+<|im_start|>system
+You are a helpful assistant.<|im_end|>
+<|im_start|>user
+What is 1 + 1?<|im_end|>
+<|im_start|>assistant
+2<|im_end|>
+<|im_start|>user
+What did I just ask?<|im_end|>
+<|im_start|>assistant
+521
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 526>>>
+
+This trim_input_tensor helper function ensures that enough room remains in the context
+window for the new tokens. If the conversation becomes too long, the oldest tokens are
+discarded first via left truncation. (Other, more sophisticated options also exist in practice,
+such as summarizing the previous context; however, for the sake of simplicity, this is not
+implemented here.)
+G.6.3 How the multi-turn script uses history
+The actual multi-turn behavior appears inside the message handler. At the beginning of
+each turn, the script retrieves the current session history and appends the new user
+message:
+It then builds the full prompt from that history, tokenizes it, optionally trims it, and streams
+the answer in the same way as before.
+At the end of generation, it stores the model reply back into the same history list:
+This is the core difference relative to the single-turn script. The multi-turn version does not
+merely display a chat transcript in the browser, that is, it actually feeds the earlier turns
+back into the model so that future responses can condition on them.
+The launch command is analogous to the single-turn case:
+Listing G.4 Trimming the prompt to fit the context window
+#A If the prompt is too long, left-truncate to
+def trim_input_tensor(input_ids_tensor, context_len, max_new_tokens):
+assert max_new_tokens < context_len
+keep_len = max(1, context_len - max_new_tokens)
+#A If the prompt is too long, left-truncate to keep_len
+if input_ids_tensor.shape[1] > keep_len: #A
+input_ids_tensor = input_ids_tensor[:, -keep_len:]
+return input_ids_tensor
+history = chainlit.user_session.get("history")
+history.append({"role": "user", "content": message.content})
+history.append({"role": "assistant", "content": out_msg.content})
+chainlit.user_session.set("history", history)
+uv run chainlit run chG/01_main-chapter-code/qwen3_chat_interface_multiturn.py
+522
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 527>>>
+
+Operationally, the script behaves just like the regular Chainlit interface, as shown in figure
+G.3. The difference is only in how the prompt is constructed internally.
+Figure G.3 Example response in the Chainlit interface with multiple prompts and responses.
+The second response in figure G.3 indicates that the model remembers the first question
+through the provided context.
+523
+THIAGO BANDEIRA <thiago@lar.ifce.edu.br>
+
+<<<page 528>>>
+
+G.6.4 Recommendations
+There is an important practical limitation worth emphasizing. The multi-turn Chainlit script
+is intended for the official Qwen3 reasoning variant. It is not a good fit for the chapter 8
+distillation checkpoints, for example.
+The reason is that the distillation checkpoints were trained on prompt-response style
+supervision rather than on persistent multi-turn chat histories. In other words, they were
+not trained to continue a conversation over several turns in the same way as the official
+reasoning checkpoint.
+As a consequence, the multi-turn script should not be expected to work reliably with the
+distillation checkpoints. The practical recommendation is:
+use the single-turn Chainlit script for quick interactive tests, including
+custom chapter 6, 7, and 8 checkpoints;
+    
+use the multi-turn Chainlit script with the official reasoning checkpoint
+when you want conversation memory.
+    
+524

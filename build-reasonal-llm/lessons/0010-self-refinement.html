@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 10 课 · Self-Refinement — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 10 课 · Self-Refinement：让模型批改自己</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §5.7–5.8</span>
+    <span class="chip">⏱ 25–35 分钟</span>
+    <span class="chip">🎯 收获：草稿→批评→修订循环 + 一张诚实的成绩单（打分器可能帮倒忙）</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>这是三大推理时方法的最后一个，也是<strong>最像人类</strong>的一个：先写、再审、再改。它不依赖"可提取的短答案"，适用面比投票广。同时这课有一个珍贵的反面结论：<b>上节课精心搭建的 logprob 打分器，实测里是三个选项中最差的</b>——亲眼看看"听起来合理的方法如何被实验打脸"，正是你工作里评估技术方案最需要的肌肉。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>三段式流程</h2>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">① 草稿<small>正常答题</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">② 批评<small>critique prompt</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">③ 修订<small>refine prompt</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">④ 打分裁决<small>score ≥ 旧分才接受</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · self-refinement 一轮。可迭代多轮；打分器可选（不装则永远接受最新版）。<span class="cite">BRM fig 5.20/5.21</span></div>
+  </div>
+
+  <p>两个 prompt 模板<span class="cite">BRM §5.7, listing 5.10–5.11</span>：</p>
+
+<pre><code>def make_critique_prompt(raw_prompt, draft):
+    return ("You are a meticulous reviewer. Identify logical errors, missing "
+            "steps, or arithmetic mistakes. If the answer seems correct, "
+            "say so briefly. Then propose a concise plan to fix issues.\n\n"
+            f"Question:\n{raw_prompt}\n\nDraft answer:\n{draft}\n\n"
+            "Write a short critique and bullet-point fix plan (under ~120 words).\nCritique:")
+
+def make_refine_prompt(raw_prompt, draft, critique):
+    return ("Revise the answer using the critique. Keep it concise and "
+            "end with a final boxed result: \\boxed{ANSWER}\n\n"
+            f"Question:\n{raw_prompt}\n\nPrevious answer:\n{draft}\n\n"
+            f"Critique:\n{critique}\n\nRevised answer:")</code></pre>
+
+  <p>书中实例（T=0.7, p=0.9）：草稿答 <code>\boxed{18}</code>（错，正确 83）→ 批评环节写出五步修正计划（乘 2 消分母 → 移项 → x=83）→ 修订答案 <code>\boxed{83}</code> ✅<span class="cite">BRM §5.7</span></p>
+
+  <div class="callout key">
+    <span class="co-label">微妙之处</span>那份批评里说"题目本身有逻辑错误"——<b>并不成立</b>，但它附带的修正计划是对的。教训：批评不必全对也能有用，只要它把修订往好的方向推。<span class="cite">BRM §5.7</span>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>循环 + 打分裁决</h2>
+
+  <p><code>self_refinement_loop</code> 把流程打包成多轮迭代，核心结构<span class="cite">BRM §5.8, listing 5.12</span>：</p>
+
+<pre><code>def self_refinement_loop(model, tokenizer, raw_prompt, device,
+                         iterations=2, score_fn=None, ...):
+    current_full = 生成草稿(...)
+    current_score = score_fn(...) if score_fn else 0.0
+    for it in range(iterations):
+        critique  = 生成(make_critique_prompt(raw_prompt, current_full))
+        revised   = 生成(make_refine_prompt(raw_prompt, current_full, critique))
+        revised_score = score_fn(...) if score_fn else 0.0
+        if revised_score >= current_score:      # 不退步才接受
+            current_full, current_score = revised_full, revised_score
+    return {"final_full": ..., "steps": [...]}</code></pre>
+
+  <p>打分器即插即用——用 <code>functools.partial</code> 把上节课的 <code>avg_logprob_answer</code> 预绑参数做成 <code>score_fn</code><span class="cite">BRM §5.8</span>。书中单题跑两轮：第 1 轮 10→83（分数 −0.855→−0.226 ✅接受）；第 2 轮 83→83 但分数掉到 −1.320 ❌拒绝——<b>打分器防住了"越改越差"</b>。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>诚实的成绩单</h2>
+
+  <table>
+    <thead><tr><th>方法</th><th>打分器</th><th>轮数</th><th>准确率</th></tr></thead>
+    <tbody>
+      <tr><td>base 基线（贪心）</td><td>—</td><td>—</td><td>15.2%</td></tr>
+      <tr><td>base + self-refinement</td><td><b>无</b></td><td>1</td><td><b>25.0%</b></td></tr>
+      <tr><td>base + self-refinement</td><td><b>无</b></td><td>2</td><td>22.0%</td></tr>
+      <tr><td>base + self-refinement</td><td>启发式</td><td>1</td><td>21.6%</td></tr>
+      <tr><td>base + self-refinement</td><td>启发式</td><td>2</td><td>20.8%</td></tr>
+      <tr><td>base + self-refinement</td><td>avg logprob</td><td>1</td><td>21.4%</td></tr>
+      <tr><td>base + self-refinement</td><td>avg logprob</td><td>2</td><td>22.0%</td></tr>
+      <tr><td>reasoning 基线</td><td>—</td><td>—</td><td>48.2%</td></tr>
+      <tr><td>reasoning + self-refinement</td><td><b>无</b></td><td>1</td><td>56.6%</td></tr>
+      <tr><td>reasoning + self-refinement</td><td><b>启发式</b></td><td>1</td><td><b>57.8%</b></td></tr>
+      <tr><td>reasoning + self-refinement</td><td>avg logprob</td><td>1</td><td>48.4%</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · MATH-500 全集。<span class="cite">BRM table 5.1</span></p>
+
+  <p>五个扎心的读数<span class="cite">BRM §5.8</span>：</p>
+  <ol>
+    <li><b>base 模型上 self-refinement 有效但平庸</b>：最好 25.0%（不打分！），远不如投票的 52%。多轮反而掉分（22.0%）——越改越跑偏。</li>
+    <li><b>两个打分器在 base 上都帮倒忙</b>（21.x &lt; 25.0）：它们有时会拒绝正确的修改、接受错误的修改。</li>
+    <li><b>avg logprob 最差</b>，reasoning 模型上甚至打回原形（48.4% ≈ 基线）——因为它奖励"模型觉得顺"而非"答案对"，正是第 9 课警告的<b>自信的失误</b>。</li>
+    <li><b>reasoning 模型才是 self-refinement 的主场</b>：+9.6 分（48.2→57.8，配启发式打分）。它训练过"检查自己的推理"，更会批评自己。</li>
+    <li><b>base + CoT + self-refinement 直接失败</b>（书中未列数）——方法组合不总是叠加增益。</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="co-label">工作决策框架</span>三个推理时方法的选型（数学类任务，base 模型）：<b>CoT（便宜打底）→ self-consistency（上限最高 52%）</b>；self-refinement 更适合<b>已训练的推理模型</b>或<b>无短答案的开放任务</b>。天花板：DeepSeekMath-V2 用「专门训练的批评模型 + 训练主模型配合修正」拿到竞赛金牌级（2025.11）——说明这条路线吃训练，纯 prompt 版收益有限。<span class="cite">BRM §5.8</span>
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>阶段收官</h2>
+
+  <p>至此 <b>Stage 3（推理时扩展）完结</b>：CoT、self-consistency、self-refinement 三张牌都会了，也都知道各自的账单和适用面。但它们的共同天花板是——<b>模型本身没变</b>。下一阶段（ch6–7）开始动真格：<strong>用强化学习更新权重，把模型本身变成推理模型</strong>。<span class="cite">BRM §5.8, fig 5.22</span></p>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>Self-refinement = 草稿→批评→修订循环 + 打分门卫（不退步才接受）。base 上不如投票（25% vs 52%）；reasoning 模型上 +9.6 分；logprob 打分器最容易把流畅的错误放行。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/2303.17651">Self-Refine: Iterative Refinement with Self-Feedback</a>（Madaan et al., 2023）——方法出处。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0011-rl-primer.html">RL 铺垫课</a>——你没有 RL 背景，所以先不进 ch6 正文，用一课把 policy、reward、advantage、RLHF→RLVR 这几个词变成直觉。第 9 课的 logprob 会在这里重新登场。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想跑书里的单题 self-refinement 实验别犹豫；"我们产品的开放性任务能不能套这个循环"也欢迎讨论。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0009-logprob-confidence.html">← 第 9 课</a>
+    <a class="nav-next" href="0011-rl-primer.html">第 11 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 10 课检索练习",
+    questions: [
+      {
+        question: "self-refinement 一轮的正确顺序是？",
+        options: ["批评→草稿→修订", "草稿→批评→修订", "修订→打分→批评", "草稿→修订→重采样"],
+        answer: 1,
+        explain: "BRM §5.7 fig 5.20：先生成初始答案，再让模型写批评+修正计划，最后按批评修订；可选打分裁决是否接受。"
+      },
+      {
+        question: "书中批评说「题目有逻辑错误」（其实没有），这说明了什么？",
+        options: ["批评质量决定方法上限", "批评不必全对也能推动改进", "必须用更强的批评模型", "base 模型不适合此方法"],
+        answer: 1,
+        explain: "BRM §5.7：该批评附带的五步修正计划是对的，最终答案被改对——批评部分错误不致命，方向对就有用。"
+      },
+      {
+        question: "MATH-500 实测中，base 模型 self-refinement 的最佳配置是？",
+        options: ["两轮加启发式打分", "一轮加 logprob 打分", "一轮且不打分", "两轮且不打分"],
+        answer: 2,
+        explain: "BRM table 5.1：无打分 1 轮 25.0% 最高；两个打分器在 base 上都降到 21% 上下，多轮也不涨。"
+      },
+      {
+        question: "avg logprob 打分器表现最差的原因是？",
+        options: ["计算开销过于巨大", "数值下溢不可用", "奖励流畅而非正确", "对长答案天然歧视"],
+        answer: 2,
+        explain: "BRM §5.8：logprob 度量「模型自己觉得顺不顺」，会放行 fluent/familiar 但错误的答案——自信的失误。"
+      },
+      {
+        question: "self-refinement 相对 self-consistency 的核心优势是？",
+        options: ["准确率总是更高", "不依赖可提取的短答案", "计算成本更加低廉", "不需要采样温度"],
+        answer: 1,
+        explain: "BRM §5.8：投票需要众数（数值/短答案），refinement 是串行改写，适用开放性任务；但数学任务上 base 模型准确率不如投票。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

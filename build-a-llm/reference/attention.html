@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>注意力机制速查 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Reference · 注意力速查表</p>
+  <h1>自注意力：从直觉到公式</h1>
+  <p class="subtitle">第 4–6 课的全部核心浓缩在一页。对应书第 3 章（pp.64–108）。</p>
+
+  <h2>一、一句话原理</h2>
+  <p>每个词的新表示 = 按<b>相关性加权</b>聚合序列中所有词的旧表示。相关性由点积衡量。</p>
+
+  <h2>二、演化阶梯</h2>
+  <table>
+    <tr><th>阶段</th><th>机制</th><th>痛点</th></tr>
+    <tr><td>RNN / LSTM</td><td>逐步传递隐状态</td><td>长序列信息遗忘；无法并行</td></tr>
+    <tr><td>简化自注意力（第4课）</td><td>x·xᵀ 打分 → softmax → 加权求和</td><td>没有可训练参数</td></tr>
+    <tr><td>可训练自注意力（第5课）</td><td>引入 W_q/W_k/W_v</td><td>点积过大 → softmax 饱和</td></tr>
+    <tr><td>缩放点积（第5课）</td><td>÷ √d_k</td><td>还能看到未来 → 泄漏</td></tr>
+    <tr><td>因果注意力（第6课）</td><td>+ 上三角 −∞ 掩码</td><td>单视角</td></tr>
+    <tr><td><b>多头注意力（第6课）</b></td><td>12 头并行（各 64 维）+ dropout</td><td>—（GPT 最终形态）</td></tr>
+  </table>
+
+  <h2>三、核心公式</h2>
+<pre><code>得分:   s = x_q · x_k                    （相关度，第4课 0.9544 的直觉）
+权重:   α = softmax(s / √d_k)           （第5课：防饱和；d_k=每头维度64）
+输出:   z = Σ α_i · v_i                 （加权求和）
+
+合体:   Attention(Q,K,V) = softmax(QKᵀ/√d_k) · V
+        Q = X·W_q,  K = X·W_k,  V = X·W_v
+
+因果版: scores.masked_fill(mask, -inf)  （上三角掩码，softmax 后未来=0）
+多头:   先投影 [b,T,768] → view 拆 12×[b,T,64] → 各自注意力 → 拼回 → out_proj</code></pre>
+
+  <h2>四、q / k / v 数据库类比</h2>
+  <table>
+    <tr><th></th><th>角色</th><th>来源</th></tr>
+    <tr><td>Query 查询</td><td>"我在找什么"</td><td>当前词的投影</td></tr>
+    <tr><td>Key 键</td><td>"我能提供什么标签"</td><td>所有词的投影</td></tr>
+    <tr><td>Value 值</td><td>"我的实际内容"</td><td>所有词的投影</td></tr>
+  </table>
+  <p>q·k 匹配度决定从各 v 拿多少信息。</p>
+
+  <h2>五、为什么要 √d_k</h2>
+  <p>点积是 d_k 项乘积之和，方差随 d_k 线性增长。大点积 → softmax 输出接近 one-hot → 梯度≈0（回忆 sigmoid 饱和）。除以 √d_k 把方差拉回 1，梯度健康。这是面试高频题。</p>
+
+  <h2>六、因果掩码为什么是 −∞</h2>
+  <p>e^−∞ = 0：softmax 天然归零，无需额外处理；未来 token 权重恰为 0，逐词生成的自回归训练才成立。top-k 采样（第 12 课）屏蔽非候选词用的同一招。</p>
+
+  <p style="margin-top:2em"><a href="../lessons/index.html">← 返回课程导航</a> · <a href="glossary.html">术语表</a></p>
+
+  <footer>
+    <p>Build a LLM From Scratch · 参考文档 · 依据主教材第 3 章整理 · 论文：Attention Is All You Need (arXiv:1706.03762)</p>
+  </footer>
+</main>
+</body>
+</html>

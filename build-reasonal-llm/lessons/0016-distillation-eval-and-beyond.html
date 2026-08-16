@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 16 课 · 蒸馏 II 与全书收官 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 16 课 · 蒸馏 II：成绩单、方法选型与全书收官</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §8.8–8.10</span>
+    <span class="chip">⏱ 40–50 分钟</span>
+    <span class="chip">🎯 收获：三条路线终局对比 + 你的工作应用地图</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>最后一个数字揭晓：0.6B 学生蒸馏后能到多少分？这课把全书三条路线放进同一张表，然后回答你最初的问题——<b>"工作上，我该怎么用这些？"</b></p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>蒸馏成绩单：一个惊喜发现</h2>
+
+  <table>
+    <thead><tr><th>方法</th><th>Epoch</th><th>val loss</th><th>MATH-500</th></tr></thead>
+    <tbody>
+      <tr><td>base Qwen3 0.6B（起点）</td><td>—</td><td>—</td><td>15.2%</td></tr>
+      <tr><td>蒸馏自 DeepSeek-R1（671B）</td><td>1→3</td><td>0.544→0.534</td><td>30.6→<b>33.6%</b></td></tr>
+      <tr><td>蒸馏自 Qwen3 235B-A22B</td><td>1→3</td><td>0.404→0.395</td><td><b>45.0%</b>→44.2%</td></tr>
+      <tr><td>官方 Qwen3 0.6B reasoning</td><td>—</td><td>—</td><td>48.2%</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · 教师水平：R1 在 MATH-500 上 91.2%，Qwen 235B 92.4%。<span class="cite">BRM table 8.1</span></p>
+
+  <p>两个关键读数<span class="cite">BRM §8.8</span>：</p>
+  <ol>
+    <li><b>同门教师效果更好</b>：Qwen 学生跟 Qwen 教师 tokenizer、提示风格、行文习惯一致——45.0% vs 跨门的 33.6%。<b>选教师，同家族优先</b>。</li>
+    <li><b>45% ≈ 官方 48.2%</b>：官方也是蒸馏的（同款教师），只是用了大得多的数据。我们用 6695 条 × 3 epochs 几乎追平——<b>配方对了，差的只是规模</b>。学生当然追不上教师（92%），但拿回了教师推理行为的<b>一半</b>。</li>
+  </ol>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>终局对比：三条路线一张表</h2>
+
+  <table>
+    <thead><tr><th></th><th>推理时扩展<br>(第 6–10 课)</th><th>RLVR + GRPO<br>(第 11–14 课)</th><th>蒸馏<br>(第 15–16 课)</th></tr></thead>
+    <tbody>
+      <tr><td>改权重？</td><td>❌ 冻结</td><td>✅</td><td>✅</td></tr>
+      <tr><td>最佳成绩</td><td>52.0%（CoT+投票 n=10）</td><td>47.4%</td><td>45.0%</td></tr>
+      <tr><td>单位成本</td><td>每次推理都付</td><td>训练贵（12h/70GB），推理便宜</td><td>最便宜（3h/15GB）</td></tr>
+      <tr><td>依赖</td><td>无</td><td>可验证的奖励</td><td>强教师 + 训练数据</td></tr>
+      <tr><td>上限</td><td>受限于模型本身</td><td>验证器覆盖范围</td><td>教师水平 × 学生容量</td></tr>
+      <tr><td>最佳场景</td><td>立即提效、低延迟敏感度低</td><td>数学/代码、有算力</td><td>预算紧、要部署小模型</td></tr>
+    </tbody>
+  </table>
+
+  <p>官方配方是<b>组合拳</b>：蒸馏打底 → RLVR 冲高 → 部署时再加推理时扩展<span class="cite">BRM §8.10.1</span>。R1 旗舰走 RLVR，R1 小模型走蒸馏——<b>不是二选一，是分层策略</b>。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>一条暗线：验证器是全书的地基</h2>
+
+  <p>回头看，第 4 课那个 130 行的数学验证器撑起了后面的一切：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">验证器<small>第 4 课</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">评估 harness<small>第 5 课</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">reward_rlvr<small>第 12 课：RL 的奖励</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">checkpoint 评估<small>第 13/16 课</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 同一个验证器：先当裁判（评估），再当老师（发奖励）。logprob 同理：第 9 课打分 → 第 13 课进损失 → 第 15 课变 cross-entropy。</div>
+  </div>
+
+  <p>这就是为什么领域变化快而 fundamentals 不贬值：新方法（DAPO、GSPO……）都能映射回这些积木——评估、奖励、logprob、优势<span class="cite">BRM §8.10.2</span>。</p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>你的工作应用地图</h2>
+
+  <div class="callout key">
+    <span class="co-label">评估与选型（立即可做）</span>
+    ① 用第 5 课的 harness 思路给内部任务建小评估集（prompt 敏感度实验警告：模板要固定）；② 供应商/模型对比先跑基线裸模板，别被 demo 带跑；③ 看到"测试集通过率"先问：多少题、什么模板、几人评测过。
+  </div>
+  <div class="callout key">
+    <span class="co-label">提升准确率（低成本先行）</span>
+    ① 有标准短答案的任务 → CoT + self-consistency（n=3 起步，看收益曲线）；② 需要"改稿"类任务 → self-refinement（记得打分门卫，别裸跑多轮）；③ 延迟敏感 → 谨慎投票，它把成本乘 n。
+  </div>
+  <div class="callout key">
+    <span class="co-label">训练路线（有算力/预算时）</span>
+    ① 任务可自动验证（数学/代码/单测）→ RLVR，从书里的 GRPO 代码起步；② 不可验证但有强教师 → 蒸馏（同家族教师、长度过滤、val loss 监控）；③ 都做 → 蒸馏打底再 RLVR 冲高，部署时叠加推理时扩展。
+  </div>
+
+  <p><b>领域往哪走</b>（保持更新三件套：arXiv 扫主题、新模型技术报告/model card、r/LocalLLaMA 实践社区）<span class="cite">BRM §8.9</span>：自适应推理预算（GPT-5 的 auto 模式）；过程奖励（评中间步骤而非只看结果，DeepSeekMath-V2）；agent 场景的多奖励训练（工具调用、检索、合规各设奖励）——蒸馏依然是把这些行为搬进小模型的主力通道。</p>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>蒸馏终局 45%：同门教师 &gt; 跨门（45 vs 33.6），规模对了能逼近官方 48.2%。三条路线——推理时扩展 52%、RLVR 47.4%、蒸馏 45%——各有账单；官方玩法是组合拳。验证器 + logprob 是贯穿全书的两块基石。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>课程收官</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">🏁</span><strong>你已完成 16 课</strong>：从一个"推理是什么"的定义，到亲手写出验证器、采样器、打分器、GRPO 损失、蒸馏循环——每一行都建立在书稿原文之上。</p>
+    <p><span class="ns">⏭</span><strong>下一步建议</strong>：① 挑一条路线在 Mac 上完整跑一遍（推荐：下载书作者的 checkpoint 跑评估，或小规模蒸馏）；② 把工作中的一个真实任务套进第 04 节的地图；③ 回到 <a href="../reference/glossary.html">术语表</a>做全书自测。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：结课不代表结束——复盘任何一课、规划实跑、讨论工作落地，我都在。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0015-distillation-data-and-sft.html">← 第 15 课</a>
+    <a class="nav-next" href="0001-what-is-reasoning.html">回到第 1 课 ↺</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 16 课检索练习",
+    questions: [
+      {
+        question: "Qwen 学生跟 Qwen 教师蒸馏效果更好，最可能的原因是？",
+        options: ["教师准确率更加高", "tokenizer 与行文风格同门对齐", "训练数据数量翻倍", "学习率设置更加合理"],
+        answer: 1,
+        explain: "BRM §8.8：师生同家族 → 分词器、提示惯例、回答风格一致，目标序列更容易被小模型模仿（R1 教师其实分数略低些不是关键，两者 91.2% vs 92.4% 相近）。"
+      },
+      {
+        question: "三条路线的成本结构，说法正确的是？",
+        options: ["推理时扩展一次付费终身有效", "蒸馏推理便宜但训练贵过 RLVR", "推理时扩展每次推理都付费", "RLVR 部署后每次调用更贵"],
+        answer: 2,
+        explain: "推理时扩展把成本乘在每个请求上；RLVR/蒸馏训练一次、部署后便宜；蒸馏训练又远比 RLVR 便宜（3h/15GB vs 12h/70GB）。"
+      },
+      {
+        question: "官方（Qwen/DeepSeek）的完整配方是什么组合？",
+        options: ["只做 RLVR", "只做蒸馏", "蒸馏打底再 RLVR，部署加推理时扩展", "纯预训练不加后训练"],
+        answer: 2,
+        explain: "BRM §8.10.1：R1 旗舰走 RLVR，小模型蒸馏自旗舰；部署时再叠 self-consistency 等——分层组合，不是单选。"
+      },
+      {
+        question: "「验证器是全书地基」体现在哪里？",
+        options: ["它决定了模型的词表大小", "它既是评估裁判又是 RL 奖励来源", "它负责生成教师的训练数据", "它替代了 cross-entropy 损失"],
+        answer: 1,
+        explain: "第 4 课写的验证器：第 5 课当评估裁判 → 第 12 课 reward_rlvr 当训练信号 → 第 13/16 课评估 checkpoint——一处编写，处处复用。"
+      },
+      {
+        question: "面对领域快速迭代，作者建议的应对策略是？",
+        options: ["追读每篇新论文", "把新方法映射回 fundamentals", "只用最老的算法", "等教科书更新后再学"],
+        answer: 1,
+        explain: "BRM §8.10.2：新方法多是评估/奖励/logprob/优势这些积木的变体组合；arXiv 扫主题、读技术报告、逛实践社区，映射回基础即可快速消化。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

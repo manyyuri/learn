@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 2 课 · 加载模型与生成循环 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 2 课 · 在你的 Mac 上加载模型，手写生成循环</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §2.1–2.7</span>
+    <span class="chip">⏱ 30–40 分钟</span>
+    <span class="chip">🎯 收获：亲手跑通 Qwen3 0.6B + 读懂生成函数每一行</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>全书后面每一种推理技术——评估、CoT、投票、GRPO 训练——都建立在同一条地基上：<strong>把 prompt 变成 token ID → 喂给模型 → 取下一个 token → 循环</strong>。这一课你在自己的 M1 Pro 上把它跑起来，并且读懂每一个张量形状。读懂了它，后面所有课的代码你都能一眼看穿。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>主角登场：Qwen3 0.6B base</h2>
+
+  <p>全书用 <strong>Qwen3 0.6B base 模型</strong>作为实验台<span class="cite">BRM §2.5</span>。为什么是它：小而够强、开源权重（open-weight，可下载训练好的权重）、能在消费级硬件上跑；而且 Qwen3 家族同时有 base 版和官方推理版，方便后面做对照。</p>
+
+  <div class="margin-note">
+    <span class="mn-label">🚗 大众甲壳虫</span>Raschka 的比喻：学造车不必从法拉利开始——造一辆甲壳虫反而更能看清引擎和变速箱。DeepSeek V3（R1 的底座）训练用了 2048 块 H800 约 11 周、1480 万 GPU 时、约 550 万美元；我们用同一套<em>方法</em>、小一号的模型。<span class="cite">BRM §2.3</span>
+  </div>
+
+  <p>书的模型代码是作者用纯 PyTorch 重写的 Qwen3（不依赖 transformers 等库，强调可读可改），但<b>加载的是官方原版预训练权重</b>，完全兼容。架构你已在上一本书里学过，这里只需认脸：embedding 层 → 28 个 transformer block（GQA 注意力 + 前馈）→ 输出头。词表 151,936。<span class="cite">BRM §2.5</span></p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>环境（5 分钟）</h2>
+
+  <p>推荐用 <code>uv</code>（Raschka 本人推荐，比 pip 快且自动隔离环境）<span class="cite">BRM §2.2</span>：</p>
+
+<pre><code># 1) 装 uv：https://docs.astral.sh/uv/getting-started/installation/
+# 2) 克隆配套代码仓（浅克隆，省时省空间）
+git clone --depth 1 https://github.com/rasbt/reasoning-from-scratch.git
+cd reasoning-from-scratch
+# 3) 启动 JupyterLab（自动建虚拟环境、装依赖）
+uv run jupyter lab</code></pre>
+
+  <p>或者经典 pip 路线（Python 3.10+）：</p>
+
+<pre><code>pip install torch&gt;=2.10.0 tokenizers&gt;=0.22.2 reasoning-from-scratch</code></pre>
+
+  <div class="callout warn">
+    <span class="co-label">M1 Pro 注意</span>① torch 装官方 pip 包即可自带 MPS 支持；② 书的模型加载的权重是 <code>bf16</code>——MPS 上跑没问题，但某些老版本 PyTorch 对 MPS 的 bf16 支持有限，遇报错先升级 PyTorch 到 2.9+；③ 本课代码 CPU 也完全能跑（慢一点而已）<span class="cite">BRM §2.3</span>。
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>Tokenizer：文本 ⇄ token ID</h2>
+
+  <p>模型不认识文字，只认识整数 ID。Tokenizer 负责双向转换<span class="cite">BRM §2.4</span>：</p>
+
+<pre><code>from pathlib import Path
+from reasoning_from_scratch.qwen3 import (
+    download_qwen3_small, Qwen3Tokenizer)
+
+download_qwen3_small(kind="base", tokenizer_only=True, out_dir="qwen3")
+tokenizer = Qwen3Tokenizer(Path("qwen3") / "tokenizer-base.json")
+
+prompt = "Explain large language models."
+ids = tokenizer.encode(prompt)      # 文本 → ID 列表
+print(tokenizer.decode(ids))        # ID → 文本（round-trip 无损）
+
+for i in ids:
+    print(f"{i} --&gt; {tokenizer.decode([i])}")
+# 840 --&gt; Ex   20772 --&gt; plain   3460 --&gt;  large
+# 4128 --&gt;  language   4119 --&gt;  models   13 --&gt; .</code></pre>
+
+  <p>注意 <code>"Explain"</code> 被拆成 <code>Ex</code> + <code>plain</code> 两个 token——这是 <span class="term">BPE</span>（Byte Pair Encoding）子词分词：常见词整存，罕见词拆开存；空格通常并入 token（<code>" large"</code> 带前导空格），帮模型识别词边界。<span class="cite">BRM §2.4</span></p>
+
+  <div class="callout note">
+    <span class="co-label">词表大小的权衡</span>Qwen3 词表约 15.1 万（GPT-2 约 5 万、Llama 3 约 12.8 万）。词表越大：embedding 和输出层越大、单 token 计算越贵；但更多词能整词成 token → 序列更短 → 总计算反而不一定多。<span class="cite">BRM §2.4</span>
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>一次前向传播里发生了什么</h2>
+
+  <p>关键直觉——<b>模型一次算出每个位置的"下一个词"预测</b>，但我们只用最后一个<span class="cite">BRM §2.6</span>：</p>
+
+<pre><code>input_tensor = torch.tensor(ids).unsqueeze(0).to(device)  # (1, 6)
+with torch.inference_mode():
+    out = model(input_tensor)          # (1, 6, 151936)
+print(out.shape)  # torch.Size([1, 6, 151936])</code></pre>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">6 个输入 token<small>每位置都有输出</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">6 × 151,936 分数矩阵<small>logits</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">只取最后一行<small>[-1]</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">argmax → 下一个 token</div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 6 个 token 进 → 6 行 logits 出 → 只用最后一行（它预测的是"还没出现的下一个词"）。<span class="cite">BRM fig 2.11–2.12</span></div>
+  </div>
+
+  <ul>
+    <li><code>unsqueeze(0)</code>：把一维 tensor 变成 <code>(1, 6)</code>——模型按批（batch）维度设计。<span class="cite">BRM §2.6 侧栏</span></li>
+    <li>logits 是每个词表项的<strong>原始分数</strong>（此书权重是 bf16，所以你会看到 <code>dtype=torch.bfloat16</code>）。</li>
+    <li><code>torch.argmax</code> 取分数最大的位置——位置号恰好就是 token ID。这叫 <span class="term">greedy decoding</span>（贪心解码）：永远选最高分。第 7 课我们会换成带随机性的采样。<span class="cite">BRM §2.6 侧栏</span></li>
+    <li><code>torch.inference_mode()</code>：推理不记梯度，省内存提速。<span class="cite">BRM §2.6</span></li>
+  </ul>
+
+  <!-- ==================== 5 ==================== -->
+  <h2><span class="secno">05</span>生成循环：20 行核心代码</h2>
+
+  <p>把"预测一个 token"套上循环，就是全部的生成机制<span class="cite">BRM §2.7, listing 2.2</span>：</p>
+
+<pre><code>@torch.inference_mode()
+def generate_text_basic_stream(model, token_ids, max_new_tokens, eos_token_id=None):
+    model.eval()                                    # 关掉 dropout 等，确定性
+    for _ in range(max_new_tokens):
+        out = model(token_ids)[:, -1]               # 只要最后一个位置的 logits
+        next_token = torch.argmax(out, dim=-1, keepdim=True)
+        if eos_token_id is not None and torch.all(next_token == eos_token_id):
+            break                                   # 生成完（EOS）就停
+        yield next_token                            # 流式吐出，边生成边打印
+        token_ids = torch.cat([token_ids, next_token], dim=1)  # 拼回输入</code></pre>
+
+  <p>跑起来（首次会下载 1.4 GB 权重）：</p>
+
+<pre><code>download_qwen3_small(kind="base", tokenizer_only=False, out_dir="qwen3")
+model = Qwen3Model(QWEN_CONFIG_06_B)               # 随机初始化的壳
+model.load_state_dict(torch.load("qwen3/qwen3-0.6B-base.pth"))  # 装入预训练权重
+model.to(device)
+
+for token in generate_text_basic_stream(
+        model, input_tensor, max_new_tokens=100,
+        eos_token_id=tokenizer.eos_token_id):      # EOS = &lt;|endoftext|&gt;, ID 151643
+    print(tokenizer.decode(token.squeeze(0).tolist()), end="", flush=True)</code></pre>
+
+  <p>输出（书里的实际结果）：</p>
+
+<blockquote style="border-left:3px solid var(--gold);margin:1.25rem 0;padding:0.35rem 1.1rem;font-size:0.95rem">
+  "Large language models are artificial intelligence systems that can understand, generate, and process human language, enabling them to perform a wide range of tasks, from answering questions to writing articles, and even creating creative content."
+</blockquote>
+
+  <p>注意两个细节：① 第一个 token <code>" Large"</code> 带前导空格是正常的（分词器习惯）；② 不传 <code>eos_token_id</code> 的话，模型在 <code>&lt;|endoftext|&gt;</code> 后会继续写新"文档"停不下来——EOS 是训练时文档结束的标记。<span class="cite">BRM §2.7</span></p>
+
+  <div class="callout key">
+    <span class="co-label">本课核心</span>书里所有花活都长在这个循环上：第 4 课往里加"取答案"；第 7 课把 argmax 换成温度采样；第 8 课在外面套 16 次循环投票；第 12 课把它变成可训练的 rollout 生成器。<strong>生成循环 = 全书的主干线。</strong>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">06</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>生成 = tokenizer 编码 → 循环【前向传播取最后位置 logits → argmax → 拼接】→ EOS 或达上限即停 → 解码回文本。</strong>
+  </div>
+
+  <h2><span class="secno">07</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：书的 <a href="https://github.com/rasbt/reasoning-from-scratch">配套仓库</a> ch02 notebook——把本课代码在你机器上完整跑一遍，这是唯一能真正掌握它的方式。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0003-kv-cache-and-compile.html">KV cache 与生成加速</a>——为什么裸循环只有 5 tokens/秒，加两招能到 68。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：跑代码报错了直接把报错贴过来；想搞懂 MPS/CPU/bf16 的关系、或者 <code>yield</code> 流式生成原理，都可以问。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0001-what-is-reasoning.html">← 第 1 课</a>
+    <a class="nav-next" href="0003-kv-cache-and-compile.html">第 3 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 2 课检索练习",
+    questions: [
+      {
+        question: "6 个 token 输入模型，输出张量形状是 (1, 6, 151936)。生成下一个 token 时用哪一行？",
+        options: ["第一行的预测值", "最后一行的输出", "六行求平均后", "随机抽一行结果"],
+        answer: 1,
+        explain: "BRM §2.6：每个位置都预测「下一个词」，但前 5 个位置的答案已在输入里，只有最后一行预测的是真正的新 token。"
+      },
+      {
+        question: "用 torch.argmax 选下一个 token 的解码方式叫什么？",
+        options: ["贪心解码 greedy", "温度解码 sampled", "束搜索 beam", "核采样 nucleus"],
+        answer: 0,
+        explain: "BRM §2.6 侧栏：永远取最高分 = greedy decoding。第 7 课会引入随机采样（temperature/top-p）。"
+      },
+      {
+        question: "「Explain」被切成 Ex + plain 两个 token，因为分词算法是？",
+        options: ["按单字符拆分", "按空格整词切", "BPE 子词算法", "按标点符号切"],
+        answer: 2,
+        explain: "BRM §2.4：BPE 常见词整存、罕见词拆子词，空格通常并入 token。"
+      },
+      {
+        question: "不传 eos_token_id 时，生成完一句话后模型会怎样？",
+        options: ["自动停止输出", "报错后停止", "原地重复采样", "继续写新文本"],
+        answer: 3,
+        explain: "BRM §2.7：&lt;|endoftext|&gt; 只是训练时的文档分隔符，模型遇到它不会自己停——必须显式检测并 break，否则接着编下一篇「文档」。"
+      },
+      {
+        question: "torch.inference_mode() 在生成循环里的作用是？",
+        options: ["提高输出质量", "省显存并提速", "让结果可复现", "自动切换设备"],
+        answer: 1,
+        explain: "BRM §2.6：不追踪梯度 → 省内存、更快。与确定性无关（那是 model.eval() 和随机种子的职责）。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>训练与微调对比 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Reference · 训练方法对比</p>
+  <h1>预训练 vs 三种微调：一张决策表</h1>
+  <p class="subtitle">第 11–16 课的方法横评。什么场景用什么招。</p>
+
+  <h2>一、总对比表</h2>
+  <table>
+    <tr><th></th><th>预训练</th><th>分类微调</th><th>指令微调</th><th>LoRA（任意微调的高效版）</th></tr>
+    <tr><td>数据</td><td>万亿级未标注文本</td><td>数百~数千条带标签（spam/ham）</td><td>数千~百万条指令-响应对</td><td>同所依附的微调</td></tr>
+    <tr><td>目标</td><td>下一个词预测</td><td>输出固定类别</td><td>生成合格回答</td><td>同左</td></tr>
+    <tr><td>改动</td><td>全部参数</td><td>换 2 维输出头 + 解冻尾部</td><td>通常全参数（或 LoRA）</td><td>冻结 W，只训 B·A</td></tr>
+    <tr><td>损失</td><td>交叉熵（全 token）</td><td>交叉熵（仅最后 token）</td><td>交叉熵（-100 屏蔽指令位）</td><td>同左</td></tr>
+    <tr><td>成本</td><td>数十万美元级</td><td>笔记本 6 分钟</td><td>A100 / M3 15 分钟</td><td>参数省 ~50 倍</td></tr>
+    <tr><td>书中章节</td><td>§5.1–5.2</td><td>第 6 章</td><td>第 7 章</td><td>附录 E</td></tr>
+  </table>
+
+  <h2>二、分类微调手术清单（第 13 课）</h2>
+<pre><code>① pad 到等长（ID 50256）；② ham→0 / spam→1
+③ 冻结全部 → 换 out_head=Linear(768,2) → 解冻末块 + final_norm
+④ 损失只算 logits[:, -1, :]（最后 token 看全句）
+⑤ AdamW lr=5e-5（小步护权重）→ 准确率 50%→97.5%</code></pre>
+
+  <h2>三、指令微调三要点（第 14 课）</h2>
+<pre><code>① Alpaca 模板：### Instruction / ### Input / ### Response
+② 自定义 collate：批内 pad + 目标中指令/填充位设 -100（ignore_index）
+   → 只学响应，不背题目；保留一个 50256 教"何时停笔"
+③ 评估：LLM-as-judge（Llama 3 打 0-100 分）
+   微调 gpt2-medium ≈ 50+；Llama3-8B-instruct = 82.6</code></pre>
+
+  <h2>四、训练稳定三件套（第 15 课，附录 D）</h2>
+<pre><code>warmup     前 0.1%–20% 步：lr 线性从 initial → peak     （防开局失稳）
+cosine     之后：半余弦周期 peak → min_lr                 （防后期震荡）
+clip       梯度 L2 范数 > 1.0 等比缩小（backward 后、step 前）（防梯度爆炸）</code></pre>
+
+  <h2>五、LoRA 速记（第 16 课，附录 E）</h2>
+<pre><code>W' = W + BA          W 冻结 [768×768]；B[768×r]·A[r×768]，r=16
+B 零初始化           → 起点 = 原模型（BA=0）
+alpha 缩放           → 控制修正强度（常取 rank 的 0.5/1/2 倍）
+124M 模型：可训练 124,441,346 → 2,666,528（≈2%），测试准确率 ~98%
+部署可合并 W+BA      → 推理零开销；或热插拔多套 A/B 适配多任务</code></pre>
+
+  <h2>六、解码策略（第 12 课）</h2>
+  <table>
+    <tr><th>策略</th><th>机制</th><th>适用</th></tr>
+    <tr><td>贪心 argmax</td><td>永远选第一名</td><td>确定输出、事实性任务</td></tr>
+    <tr><td>multinomial 采样</td><td>按概率抽签</td><td>多样性（有失控风险）</td></tr>
+    <tr><td>温度 T</td><td>logits÷T：T小尖锐 / T大平坦</td><td>0.2 保守 ~ 1.4 创意</td></tr>
+    <tr><td>top-k</td><td>只留前 k 个候选（其余 −∞）</td><td>护栏，常与温度合用</td></tr>
+  </table>
+
+  <p style="margin-top:2em"><a href="../lessons/index.html">← 返回课程导航</a> · <a href="glossary.html">术语表</a></p>
+
+  <footer>
+    <p>Build a LLM From Scratch · 参考文档 · 依据主教材第 5–7 章及附录 D/E 整理</p>
+  </footer>
+</main>
+</body>
+</html>

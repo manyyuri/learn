@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 12 课 · 解码策略与加载 OpenAI 权重</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 12 课 · Build a LLM From Scratch · 对应书 §5.3–5.4</p>
+  <h1>解码策略与加载 OpenAI 权重</h1>
+  <p class="subtitle">让生成从"复读机"变"有创意"，再把 OpenAI 公开的 GPT-2 权重灌进我们的架构——亲手摸到 124M 参数的真实力量。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的训练现场",
+      "questions": [
+        {
+          "q": "交叉熵损失衡量的是？",
+          "options": ["目标词概率的负对数均值", "生成文本的总长度", "词表的覆盖比例", "梯度范数的平均值"],
+          "answer": 0,
+          "explain": "正确下一个词概率越高 → 对数越大 → 负数越小 → 损失越小。"
+        },
+        {
+          "q": "训练 10 epoch 后 val loss 停在 6.45 的原因是？",
+          "options": ["小数据集被背下来了", "优化器梯度消失了", "词表大小选错了", "温度参数设置太低"],
+          "answer": 0,
+          "explain": "5,145 token 训 124M 模型：过拟合，模型逐字记忆训练集。"
+        },
+        {
+          "q": "预训练用哪个优化器？",
+          "options": ["AdamW 加权重衰减", "SGD 加动量项", "RMSprop 加衰减", "Adagrad 加动量"],
+          "answer": 0,
+          "explain": "AdamW（解耦权重衰减）是 LLM 训练标准选择。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>温度缩放：调节"自信度"</h2>
+  <p>贪心解码永远选第一名，输出呆板。替代方案：<span class="term">概率采样<span class="en">（probabilistic sampling）</span></span>——按概率抽签（<code>torch.multinomial</code>）。书的例子（9 词小词表，上下文 "every effort moves you"，第一候选 forward 概率约 60%）：</p>
+
+<pre><code class="language-python">probas = torch.softmax(next_token_logits, dim=0)
+next_token_id = torch.multinomial(probas, num_samples=1).item()
+# 1000 次采样：582×forward, 343×toward, 73×closer, 2×inches…</code></pre>
+
+  <p><span class="term">温度缩放<span class="en">（temperature scaling）</span></span>在 softmax 前把 logits 除以温度 T：</p>
+<pre><code class="language-python">def softmax_with_temperature(logits, temperature):
+    scaled_logits = logits / temperature
+    return torch.softmax(scaled_logits, dim=0)</code></pre>
+
+  <table>
+    <tr><th>温度</th><th>分布形态</th><th>行为</th></tr>
+    <tr><td>T → 0.1</td><td>尖锐（尖峰）</td><td>≈ argmax，接近贪心，保守</td></tr>
+    <tr><td>T = 1</td><td>原始分布</td><td>按模型本意采样</td></tr>
+    <tr><td>T = 5</td><td>平坦（均匀）</td><td>放飞自我——4% 概率出现 <i>"every effort moves you pizza"</i></td></tr>
+  </table>
+  <span class="cite">——《书》§5.3.1, pp.176–179（图 5.14）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>Top-k 采样：创意加护栏</h2>
+  <p>光调温度有风险：高温下低质量词混进来（pizza!）。<span class="term">top-k 采样<span class="en">（top-k sampling）</span></span>先圈出 logits 最高的 k 个候选，其余全部屏蔽为 −∞（softmax 后概率归零——和第 6 课因果掩码同一个技巧），再在候选内按（可选温度后的）概率采样：</p>
+
+<pre><code class="language-python">top_logits, _ = torch.topk(logits, top_k)          # k 个最大 logits
+min_val = top_logits[:, -1]                        # 门槛：第 k 大的值
+logits = torch.where(logits < min_val,
+                     torch.tensor(float('-inf')).to(logits.device),
+                     logits)                       # 低于门槛 → -inf → 概率 0
+# 之后照常：温度缩放 → softmax → multinomial（temperature=0 则退化为 argmax）</code></pre>
+
+  <p>最终版 <code>generate()</code> = top-k + 温度 + multinomial +（可选）EOS 提前停止。书的示例 <code>top_k=25, temperature=1.4</code>，输出立刻从背诵原文变成新句子。</p>
+  <span class="cite">——《书》§5.3.2–5.3.3, pp.180–183</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>保存与加载：state_dict</h2>
+<pre><code class="language-python">torch.save(model.state_dict(), "model.pth")           # 保存：层名 → 权重 的字典
+model = GPTModel(GPT_CONFIG_124M)
+model.load_state_dict(torch.load("model.pth", map_location=device))
+model.eval()
+
+# 要继续训练？把优化器状态一起存（AdamW 的动量历史丢了收敛会变差）：
+torch.save({"model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict()}, "model_and_optimizer.pth")</code></pre>
+  <span class="cite">——《书》§5.5（中文版编号），pp.184–185</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>灌入 OpenAI 权重：355MB 的下载，一生的技能</h2>
+  <p>自己预训练太贵（Llama 2 7B 约 69 万美元 A100 时，书 p.163 侧栏）。OpenAI 公开了 GPT-2 全系权重——<b>架构完全相同，只是规模不同</b>：</p>
+
+<pre><code class="language-python">from gpt_download import download_and_load_gpt2
+settings, params = download_and_load_gpt2(model_size="124M", models_dir="gpt2")
+# settings: {'n_vocab': 50257, 'n_ctx': 1024, 'n_embd': 768, 'n_head': 12, 'n_layer': 12}
+# params  : {'blocks', 'b', 'g', 'wpe', 'wte'}  ← TensorFlow 时代的命名</code></pre>
+
+  <p>然后三步映射到我们的类：① 用 model_configs 更新配置（124M→768/12/12；355M→1024/24/16…），context_length 改回 1024，<b>qkv_bias 设为 True</b>（OpenAI 的 GPT-2 用了偏置，我们之前按现代规范关了——加载权重必须顺着它）；② <code>assign()</code> 逐张量校验形状并装填；③ 对齐命名差异（OpenAI 的 <code>blocks[0].attn.c_proj.w</code> ↔ 我们的 <code>trf_blocks[0].att.out_proj.weight</code>）。形状不匹配会立即报错——这是防呆设计。</p>
+
+<pre><code class="language-python">token_ids = generate(model=gpt, idx=text_to_token_ids("Every effort moves you", tokenizer),
+                     max_new_tokens=25, context_size=1024, top_k=50, temperature=1.5)
+# → "Every effort moves you toward finding an ideal new way to practice
+#    something! What makes us want to be on top of that?"</code></pre>
+
+  <p>流畅、原创、不是背诵——124M 权重带着全网学到的语言规律住进了你手写的架构。装错了哪怕一个张量，输出立刻乱码——这本身就是最好的验收测试。</p>
+  <span class="cite">——《书》§5.4, pp.186–193（列表 5.5）</span>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "温度 0.1 会让概率分布变成什么样？",
+          "options": ["尖锐近乎贪心", "完全均匀随机", "恰好保持不变", "整体向上平移"],
+          "answer": 0,
+          "explain": "logits 除以 0.1 = 放大 10 倍差距：第一名概率趋近 100%，行为接近 argmax。"
+        },
+        {
+          "q": "top-k 采样中非候选 token 的处理是？",
+          "options": ["logits 设为负无穷", "概率除以十倍", "从词表中永久删除", "与邻近距离取均值"],
+          "answer": 0,
+          "explain": "-inf 经 softmax 归零，与因果掩码同款技巧——概率只在 top-k 内部分配。"
+        },
+        {
+          "q": "multinomial 与 argmax 的区别是？",
+          "options": ["按概率抽签而非取最大", "永远取概率最小项", "取概率的中位数词", "取词表正中间的词"],
+          "answer": 0,
+          "explain": "60% 概率的 forward 会被抽中约 6 成次数——其余给 toward/closer 等。"
+        },
+        {
+          "q": "继续训练时为何连优化器状态一起保存？",
+          "options": ["AdamW 存有动量历史", "文件体积会更小", "法律上的许可要求", "权重会自动变新鲜"],
+          "answer": 0,
+          "explain": "AdamW 为每个参数维护动量等状态；丢失后学习率动态重置，收敛可能崩坏。"
+        },
+        {
+          "q": "加载 OpenAI 权重前必须把哪项配置设为 True？",
+          "options": ["qkv 偏置开关", "dropout 开关", "权重绑定开关", "残差连接开关"],
+          "answer": 0,
+          "explain": "GPT-2 的 qkv 投影带偏置向量。架构必须与权重的形状约定完全一致。"
+        },
+        {
+          "q": "判断权重加载成功的直观方法是？",
+          "options": ["生成出连贯文本", "下载进度百分百", "文件大小正确", "配置完全相同"],
+          "answer": 0,
+          "explain": "书 p.193：装错任何一个张量，输出立刻乱码——流畅文本就是验收单。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：第 5 章通关。你掌握了 temperature/top-k 的完整直觉（能解释"pizza 时刻"），并且理解了从 state_dict 到 OpenAI 权重映射的全过程。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 13 课「分类微调」</strong><br>
+    预训练大模型怎么变成干活的产品？第一站：把 GPT-2 改造成垃圾短信分类器——只动一个输出头，最后一层的 124M 参数全部冻结。对应书第 6 章。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    面试常问："temperature 设多少合适？"——标准答案讲清权衡（事实性任务低温如 0.2，创意写作 0.8–1.4）再加 top-k 护栏，而不是背一个数字。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 12 课 · 主教材 §5.3–5.4 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch05" target="_blank">ch05</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

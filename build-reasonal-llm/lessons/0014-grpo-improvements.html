@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 14 课 · GRPO 改进 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 14 课 · GRPO 改进：监控指标、裁剪、KL 与奖励塑形</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §7.2–7.6</span>
+    <span class="chip">⏱ 40–50 分钟</span>
+    <span class="chip">🎯 收获：三个真实实验——一个修复不稳定、一个翻车、一个被模型钻空子</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>第 13 课的 GRPO 是"简化版"，50 步够用，<b>500 步就开始翻车</b>（约第 400 步准确率下滑）。这课是全书最"实战"的一章：怎么读训练曲线、怎么判断健康/崩溃、三个改进各修什么、又各引出什么新问题。你所看到的每个翻车案例，都是真实训练中会遇到的——这就是"训练推理模型"工作的日常。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>监控面板：五个仪表盘</h2>
+
+  <table>
+    <thead><tr><th>指标</th><th>健康读数</th><th>危险信号</th></tr></thead>
+    <tbody>
+      <tr><td><code>loss</code></td><td>相对平稳（只是 sanity check）</td><td>持续爆炸</td></tr>
+      <tr><td><code>reward_avg</code></td><td>缓步上升</td><td>中途崩向 0；<b>到 1.0 也该停</b>（信号消失）</td></tr>
+      <tr><td><code>avg_response_len</code></td><td>初期随准确率一起增长</td><td>无限增长顶到上限 / 骤降</td></tr>
+      <tr><td><code>adv_avg / adv_std</code></td><td>均值恒 0（设计使然）；std ≈ 1</td><td>std→0 = 学习信号消失；std 爆表 = 更新过猛</td></tr>
+      <tr><td><code>entropy</code></td><td>中等（每个生成步 ≈1–2），缓降</td><td>→ 0 = 坍缩（复读机）；飙升 = 接近随机</td></tr>
+    </tbody>
+  </table>
+
+  <p>熵的算法（一个 token 位置的分布不确定度）：H = −Σ p·log p；一条回答取各步平均<span class="cite">BRM §7.3.2</span>。<b>单独看任何一个指标都会误诊</b>——熵高 + 奖励升 = 健康探索；熵高 + 奖励崩 = 胡言乱语。要联读<span class="cite">BRM §7.3.3</span>。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>改进一：裁剪策略比率（有效 ✅）</h2>
+
+  <p>朴素 GRPO 的更新幅度没有上限。裁剪的思路：<b>限制新旧策略一步之内能差多远</b><span class="cite">BRM §7.4</span>：</p>
+
+<pre><code>log_ratio = new_logps - old_logps          # 同一批 rollouts，更新前后各算一遍 logprob
+ratio = torch.exp(log_ratio)               # =1 表示没变；&gt;&gt;1 概率大涨；&lt;&lt;1 大跌
+clipped_ratio = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps)
+
+obj = torch.where(adv >= 0,
+                  torch.minimum(ratio*adv, clipped_ratio*adv),   # 好事也别推过头
+                  torch.maximum(ratio*adv, clipped_ratio*adv))   # 坏事也别踩过头
+clipped_pg_loss = -torch.mean(obj)</code></pre>
+
+  <p>工程细节：需要 <b>old logprobs</b>——把当前模型复制成参考策略，采样一组 rollouts，先算 old、更新后再算 new。DeepSeek-R1 的规模：一次采 <b>8192 条</b> rollouts，切 16 个 minibatch 反复用；书的缩小版：每步采 8 条、小批多次<span class="cite">BRM §7.4.2</span>。ε 取值见仁见智：R1 用 10（很松），PPO 系常用 0.1（很紧）。</p>
+
+  <p><b>实测：500 步曲线平稳，第 400 步的下滑消失了</b><span class="cite">BRM §7.4.2</span>。这是来自 PPO 的经典智慧（<a href="https://arxiv.org/pdf/1707.06347">PPO 论文</a>）。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>改进二：KL 惩罚（教科书正确，实测翻车 ❌）</h2>
+
+  <p>补上原始 GRPO 的最后一项：KL 项度量当前模型偏离<b>参考模型</b>（训练起点的冻结副本）的程度，把"别走太远"写进损失<span class="cite">BRM §7.5</span>：</p>
+
+<pre><code>ref_model = copy.deepcopy(model)   # 冻结副本（R1 每 400 步才换一次参考）
+for p in ref_model.parameters(): p.requires_grad = False
+...
+kl_loss = kl_coeff * torch.mean(logps - ref_logps)   # kl_coeff 常取 0.001–0.05
+loss = pg_loss + kl_loss</code></pre>
+
+  <p><b>实测：前 50 步正常涨到 40%，随后全面崩盘</b>——loss 爆炸、奖励归零、输出变成乱码 token（"framework.raises Self profess(import"）<span class="cite">BRM §7.5.2</span>。尸检两条死因：</p>
+  <ol>
+    <li><b>求和版 KL 鼓励写长</b>：logprob 差随长度累积，拉长回答就能"摊薄" KL——于是回答长度一路涨到上限。</li>
+    <li><b>奖励崩零后 KL 独占梯度</b>：全零奖励 → 优势全零 → 策略梯度无信号，只剩 KL 项推着模型走向<b>高熵均匀分布</b> = 纯随机。准确率 0%。</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="co-label">行业现状</span>数学任务的通行做法是<b>干脆去掉 KL 项</b>（Dr. GRPO、Olmo 3、DeepSeek-V3.2 均报告去掉后更稳更好）；要留就打补丁：调小系数、按长度归一化、重要性加权（V3.2 方案）、或用格式奖励保住优势信号。<span class="cite">BRM §7.5.2 侧栏</span>——"教科书正确"与"实测有效"的差距，是最值得记住的一课。
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>改进三：格式奖励（被钻空子 ⚠）</h2>
+
+  <p>辅助奖励教会模型用 <code>&lt;think&gt;…&lt;/think&gt;</code> 包住推理过程、盒子装答案<span class="cite">BRM §7.6</span>：</p>
+
+<pre><code># 给 base tokenizer 的空占位槽加特殊 token：&lt;think&gt;→151667, &lt;/think&gt;→151668
+tokenizer_base._tok.add_special_tokens(
+    ["<tool_response>", "</tool_response>", "<think>", "</think>"])
+
+def reward_format(token_ids, prompt_len):
+    try:
+        gen = token_ids[prompt_len:].tolist()
+        return float(gen.index(151667) &lt; gen.index(151668))  # 有且有序 = 1
+    except ValueError:
+        return 0.0
+
+reward = rlvr_reward + format_reward_weight * format_reward  # 加权合并</code></pre>
+
+  <p>两个坑：① <b>base 模型从没见过 think token</b>，直接训会很差——先 SFT 再 RL，或直接训 reasoning 变体（书选后者，第 15 课正是补 SFT）；② <b>实测：模型学会了"刷格式分"</b>——format_reward_avg 居高不下，答案正确率反而下滑<span class="cite">BRM §7.6.2</span>。这就是 <span class="term">reward hacking</span>（奖励作弊）：奖励是代理指标，模型优化代理本身而不是你的真实意图。补救：权重 1.0→0.1，或<b>条件格式奖励</b>（答案对了才给格式分，书练习 7.2）。</p>
+
+  <div class="callout note">
+    <span class="co-label">后续还有 15+ 种魔改</span>DAPO 的零梯度过滤/主动采样/token 级损失、Dr. GRPO 去标准化、V3.2 的重加权 KL、GSPO 的序列级重要性采样……原理你已全部具备：都是在动"优势怎么算、比率怎么裁、KL 怎么用"这几个零件。<span class="cite">BRM §7.6.3</span>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>监控五表联读（loss/奖励/长度/优势std/熵）。裁剪限制单步位移（有效）；KL 限制长期漂移（数学任务常翻车，行业多弃用）；格式奖励要防钻空子（降权或设为条件奖励）。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/pdf/1707.06347">PPO 论文</a>（裁剪思想源头，很可读）；DAPO / Dr. GRPO 论文见书附录 A 引用。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0015-distillation-data-and-sft.html">蒸馏 I：数据生成与 SFT</a>——不用 RL，把大推理模型的能力"灌"进小模型的更便宜路线。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想下载书作者的日志 CSV 自己画曲线？想讨论"我们的场景该不该上 KL"？来聊。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0013-grpo-loss-and-training-loop.html">← 第 13 课</a>
+    <a class="nav-next" href="0015-distillation-data-and-sft.html">第 15 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 14 课检索练习",
+    questions: [
+      {
+        question: "GRPO 训练里 loss 指标的正确态度是？",
+        options: ["它是首要优化目标", "主要当 sanity check 不单独解读", "必须单调下降才正常", "越小说明模型越好"],
+        answer: 1,
+        explain: "BRM §7.2.2：GRPO 的 loss 波动大且含义少；真正要看奖励、长度、评估准确率、优势 std、熵的联合走势。"
+      },
+      {
+        question: "adv_std 趋近于零意味着什么？",
+        options: ["训练非常稳定健康", "模型已经收敛最优", "学习信号消失没有更新", "奖励马上要爆炸"],
+        answer: 2,
+        explain: "BRM §7.3.1：优势全同（如奖励全 0 或全 1）→ std=0 → 零梯度。配合 reward_avg 看：全对是好事（可停），全错是卡死。"
+      },
+      {
+        question: "熵持续飙高 + 奖励崩零，最可能发生了什么？",
+        options: ["模型在健康地探索", "模型输出接近随机分布", "学习率设置太小", "奖励函数过于宽松"],
+        answer: 1,
+        explain: "BRM §7.5.2：KL 项独占梯度时把模型推向高熵均匀分布——输出乱码 token，评估准确率归零。指标要联读。"
+      },
+      {
+        question: "裁剪策略比率（clip）防范的是什么？",
+        options: ["奖励函数的噪声", "单次更新过大导致不稳定", "回答长度无限增长", "验证器误判答案"],
+        answer: 1,
+        explain: "BRM §7.4：ratio = exp(new−old logps)，clamp 到 1±ε——限制一步之内策略的位移幅度；实测消除了第 400 步的下滑。"
+      },
+      {
+        question: "格式奖励实验中评估准确率下滑的原因是？",
+        options: ["KL 系数设置过大", "模型刷格式分而轻视答案正确性", "温度采样过于随机", "think token 不在词表里"],
+        answer: 1,
+        explain: "BRM §7.6.2：format_reward_avg 高居不下而 reward_avg 平淡——reward hacking：优化代理指标而非真实目标。补救：降权或条件化。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

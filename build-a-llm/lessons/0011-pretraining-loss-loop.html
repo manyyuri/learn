@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 11 课 · 预训练</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 11 课 · Build a LLM From Scratch · 对应书 §5.1–5.2 ⭐ 全书高潮</p>
+  <h1>预训练：教模型说话</h1>
+  <p class="subtitle">定义"说错话"的数字（交叉熵），然后看着训练循环把损失从 9.78 压到 0.39——你亲手训练的第一个 LLM。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：生成循环",
+      "questions": [
+        {
+          "q": "生成时为何只取最后一个位置的 logits？",
+          "options": ["它看完了全部上文", "它最靠近输出层", "它的数值永远最大", "它不参与注意力"],
+          "answer": 0,
+          "explain": "因果掩码保证最后位置能看全部过去——它的输出即『下一个词』的预测。"
+        },
+        {
+          "q": "贪心解码 argmax 的行为是？",
+          "options": ["永远选最大概率词", "按概率随机选词", "永远选最长的词", "轮流遍历整个词表"],
+          "answer": 0,
+          "explain": "确定性输出，同一提示永远同一结果，偏保守易重复。"
+        },
+        {
+          "q": "未训练模型输出乱码是因为？",
+          "options": ["权重仍是随机的", "上下文长度不足", "词表存在缺词", "分词器编码错误"],
+          "answer": 0,
+          "explain": "架构正确 + 参数未学 = 随机分布，正是本课要解决的问题。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>给"胡话"定价：交叉熵损失</h2>
+  <p>训练需要一把数字尺子衡量输出质量。思路：看模型给<b>正确下一个词</b>分配的概率——越高越好。书里手工推演了全过程（图 5.7 六步），值得走一遍：</p>
+
+<pre><code class="language-python"># 输入与目标：目标 = 输入右移一位（第 3 课的老朋友）
+inputs  = torch.tensor([[16833, 3626, 6100],   # every effort moves
+                        [40, 1107, 588]])     # I really like
+targets = torch.tensor([[3626, 6100, 345],    # effort moves you
+                        [1107, 588, 11311]])  # really like chocolate
+
+logits = model(inputs)                        # [2, 3, 50257]
+probas = torch.softmax(logits, dim=-1)        # 概率分布
+
+# 模型给目标词的概率（未训练时约 1/50257 ≈ 0.00002）
+target_probas = probas[0, [0,1,2], targets[0]]   # tensor([7.45e-05, 3.11e-05, 1.16e-05])
+
+log_probas = torch.log(target_probas)            # 步骤④：取对数（好优化）
+avg_log_probas = torch.mean(log_probas)          # 步骤⑤：平均
+loss = -avg_log_probas                           # 步骤⑥：取负 → tensor(10.79)</code></pre>
+
+  <p>这个 10.79 就是<span class="term">交叉熵损失<span class="en">（cross-entropy loss）</span></span>——"负的平均对数概率"。PyTorch 一行搞定（内部还更高效）：</p>
+<pre><code class="language-python">loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), targets.flatten())
+# flatten(0,1)：[2,3,50257] → [6,50257]，[2,3] → [6]</code></pre>
+
+  <p>配套的直观指标：<span class="term">困惑度<span class="en">（perplexity）</span></span> = <code>torch.exp(loss)</code> ≈ 48,725——"模型每一步像在近 5 万个词里抓瞎"。训练目标：把这两个数压下去。</p>
+  <span class="cite">——《书》§5.1.2, pp.154–162（图 5.7）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>备料：切分数据、构造批次</h2>
+  <p>训练语料：公共领域短篇《The Verdict》（5,145 个 token——刻意小到笔记本 5 分钟可训）。90/10 切分训练/验证集，复用第 3 课的 DataLoader：</p>
+<pre><code class="language-python">train_loader = create_dataloader_v1(train_data, batch_size=2,
+    max_length=256, stride=256, drop_last=True, shuffle=True)   # 9 个批次
+val_loader = create_dataloader_v1(val_data, batch_size=2,
+    max_length=256, stride=256, drop_last=False, shuffle=False) # 1 个批次</code></pre>
+  <p>还记得 stride=256=max_length 的意义吗？不重叠、省算力。训练前先量基线：train loss 10.99 / val loss 10.98——和手工推演的 10.79 一致（随机水平）。</p>
+  <span class="cite">——《书》§5.1.3, pp.162–168</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>训练循环：第 7 课五步咒的实战</h2>
+  <p>主循环就是 PyTorch 检查点里那五步，加上评估与采样打印：</p>
+<pre><code class="language-python">optimizer = torch.optim.AdamW(model.parameters(), lr=0.0004, weight_decay=0.1)
+
+train_model_simple(model, train_loader, val_loader, optimizer, device,
+                   num_epochs=10, eval_freq=5, eval_iter=5,
+                   start_context="Every effort moves you", tokenizer=tokenizer)
+# 每个 epoch: for batch → forward → loss → zero_grad → backward → step
+# 每隔几步: evaluate_model() 算两边损失 + generate_and_print_sample() 打印样文</code></pre>
+
+  <table>
+    <tr><th>进度</th><th>Train loss</th><th>Val loss</th><th>生成样文（真实输出）</th></tr>
+    <tr><td>Ep 1 起步</td><td>9.78</td><td>9.93</td><td><i>Every effort moves you,,,,,,,,,,,,.</i></td></tr>
+    <tr><td>Ep 2</td><td>5.96</td><td>6.62</td><td><i>Every effort moves you, and, and, and, and…</i></td></tr>
+    <tr><td>Ep 10</td><td><b>0.39</b></td><td>6.45</td><td><i>Every effort moves you know," was one of the axioms he laid down across the Sevres and silver…</i></td></tr>
+  </table>
+
+  <p>三个阶段看得分明：乱标点 → 卡词重复（"and, and, and"）→ 语法通顺的英文。<b>但注意 val loss 卡在 6.45 不动</b>——5,145 个 token 对 124M 参数，模型第 2 个 epoch 后就开始<b>背诵</b>训练集（书里验证：生成的句子能在原文里逐字搜到）。这是教科书级的<span class="term">过拟合<span class="en">（overfitting）</span></span>演示；真实预训练用数万亿 token，通常只训一个 epoch 就够。</p>
+  <span class="cite">——《书》§5.2, pp.168–174（图 5.12，AdamW 见 p.172）</span>
+
+  <div class="sidenote">为什么用 AdamW？Adam 的变体，改进了权重衰减<span class="en">（weight decay）</span>——惩罚大权重防过拟合，LLM 训练标配。lr=4e-4 也是小数据集场景的稳妥值。参考：Loshchilov &amp; Hutter, <i>Decoupled Weight Decay Regularization</i>, ICLR 2019（arXiv:1711.05101）。</div>
+
+  <h2><span class="secno">§4</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "交叉熵损失的本质是？",
+          "options": ["负的平均对数概率", "预测与目标的平方差", "概率分布的均值大小", "词表条目的数量倒数"],
+          "answer": 0,
+          "explain": "取目标词概率 → 取对数 → 平均 → 取负。概率越接近 1，损失越接近 0。"
+        },
+        {
+          "q": "目标 targets 是怎么构造的？",
+          "options": ["输入右移一位得到", "输入左移一位得到", "随机打乱输入得到", "取输入的最大值得到"],
+          "answer": 0,
+          "explain": "第 3 课 DataLoader 就在造这个：位置 t 的目标是位置 t+1 的真词。"
+        },
+        {
+          "q": "未训练模型的困惑度约为多少？",
+          "options": ["接近词表大小", "恒等于零点一", "约等于损失值", "始终小于等于一"],
+          "answer": 0,
+          "explain": "exp(10.79) ≈ 48,725 ≈ 50,257——『在五万个词里抓瞎』。"
+        },
+        {
+          "q": "训练后期 val loss 不再下降说明？",
+          "options": ["模型过拟合了", "学习率设置太高", "词表出现了缺词", "分词器解析失败"],
+          "answer": 0,
+          "explain": "train 0.39 vs val 6.45：模型在背诵训练集。5K token 对 124M 参数必背无疑。"
+        },
+        {
+          "q": "AdamW 相比 Adam 改进了什么？",
+          "options": ["解耦的权重衰减", "更小的内存占用", "省去了梯度计算", "自动搜索学习率"],
+          "answer": 0,
+          "explain": "权重衰减与自适应学习率解耦，正则化更有效，LLM 训练标配。"
+        },
+        {
+          "q": "本书训练用 stride=max_length 的目的是？",
+          "options": ["避免窗口重叠省算力", "让窗口重叠增数据", "打乱训练样本顺序", "扩大词表的覆盖面"],
+          "answer": 0,
+          "explain": "预训练大场景下重叠窗口收益低、成本高；第 3 课讲过的取舍。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你完成了 LLM 训练的完整闭环——定义损失、备数据、跑循环、读懂损失曲线（包括认出过拟合）。官方 ch05 notebook 在笔记本上 5 分钟可跑完，强烈建议亲手跑。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 12 课「加载 OpenAI 权重」</strong><br>
+    背诵《The Verdict》不是终点。这一课学两件事：用温度缩放与 top-k 让生成更有创意；然后下载 OpenAI 官方预训练的 GPT-2 权重灌进我们自己的架构——同一份代码，立刻说人话。对应书 §5.3–5.4。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    损失曲线的"分叉点"（train 继续降、val 停滞）是面试高频考点——能亲手画出并解释这条曲线，就赢过一半候选人。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 11 课 · 主教材 §5.1–5.2 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch05" target="_blank">ch05</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

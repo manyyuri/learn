@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 9 课 · 总装 GPT</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 9 课 · Build a LLM From Scratch · 对应书 §4.5–4.6</p>
+  <h1>总装：从 TransformerBlock 到完整 GPT</h1>
+  <p class="subtitle">30 行代码装出 1.24 亿参数的 GPT-2，并解开一个数字谜题：163M 与 124M 之差。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的四个零件",
+      "questions": [
+        {
+          "q": "LayerNorm 归一化发生在哪个维度？",
+          "options": ["嵌入的最后一维", "批量大小的维度", "上下文长度维度", "词表条目的维度"],
+          "answer": 0,
+          "explain": "dim=-1：每个 token 的 768 维独立归一化。"
+        },
+        {
+          "q": "残差连接的具体操作是？",
+          "options": ["输入直接加输出", "输出减去输入值", "输入乘以输出值", "输出除以输入均值"],
+          "answer": 0,
+          "explain": "x = x + layer(x)：恒等通路让梯度直达浅层。"
+        },
+        {
+          "q": "FFN 中第一层把维度变成多少？",
+          "options": ["3072（扩 4 倍）", "1536（扩 2 倍）", "384（缩一半）", "768（保持不变）"],
+          "answer": 0,
+          "explain": "768 → 3072 → GELU → 768，扩张-收缩结构。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>TransformerBlock：注意力的上层建筑</h2>
+  <p>把第 6 课的注意力、第 8 课的零件组装起来。数据流是<b>Pre-LayerNorm</b> 风格（GPT-2 用它，比原始 Transformer 的 Post-LN 训练更稳，书 p.134）：</p>
+
+<pre><code class="language-python">class TransformerBlock(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.att  = MultiHeadAttention(          # 第 6 课的最终版
+            d_in=cfg["emb_dim"], d_out=cfg["emb_dim"],
+            context_length=cfg["context_length"],
+            num_heads=cfg["n_heads"],
+            dropout=cfg["drop_rate"], qkv_bias=cfg["qkv_bias"])
+        self.ff   = FeedForward(cfg)             # 第 8 课：768→3072→768
+        self.norm1 = LayerNorm(cfg["emb_dim"])
+        self.norm2 = LayerNorm(cfg["emb_dim"])
+        self.drop_shortcut = nn.Dropout(cfg["drop_rate"])
+
+    def forward(self, x):
+        shortcut = x                             # ─┐ 残差 1
+        x = self.norm1(x)                        #  │ Pre-LN
+        x = self.att(x)                          #  │ 注意力（词间交流）
+        x = self.drop_shortcut(x)                #  │
+        x = x + shortcut                         # ─┘
+
+        shortcut = x                             # ─┐ 残差 2
+        x = self.norm2(x)                        #  │ Pre-LN
+        x = self.ff(x)                           #  │ FFN（逐词深加工）
+        x = self.drop_shortcut(x)                #  │
+        x = x + shortcut                         # ─┘
+        return x                                 # [b, T, 768] → [b, T, 768]</code></pre>
+
+  <p>关键设计：<b>形状全程不变</b>（[2, 4, 768] 进，[2, 4, 768] 出）。每个输出向量仍对应一个输入 token，但内容已融合全句上下文。形状不变 = 可无限堆叠。</p>
+  <span class="cite">——《书》§4.5, pp.131–135（列表 4.6）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>GPTModel：三十行的摩天大楼</h2>
+
+<pre><code class="language-python">class GPTModel(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])       # 第 3 课
+        self.pos_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])   # 第 3 课
+        self.drop_emb = nn.Dropout(cfg["drop_rate"])
+        self.trf_blocks = nn.Sequential(
+            *[TransformerBlock(cfg) for _ in range(cfg["n_layers"])])        # × 12 层
+        self.final_norm = LayerNorm(cfg["emb_dim"])
+        self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
+
+    def forward(self, in_idx):                       # in_idx: [b, T] token IDs
+        batch_size, seq_len = in_idx.shape
+        tok_embeds = self.tok_emb(in_idx)            # [b, T, 768]
+        pos_embeds = self.pos_emb(torch.arange(seq_len))
+        x = tok_embeds + pos_embeds                  # 嵌入 + 位置（第 3 课收官）
+        x = self.drop_emb(x)
+        x = self.trf_blocks(x)                       # 12 × TransformerBlock
+        x = self.final_norm(x)
+        return self.out_head(x)                      # logits: [b, T, 50257]
+
+model = GPTModel(GPT_CONFIG_124M)
+logits = model(batch)      # batch: [2, 4] → logits: [2, 4, 50257]</code></pre>
+
+  <p>对每个位置，输出一个 50257 维的 <span class="term">logits<span class="en">（logits）</span></span> 向量——词表里每个 token 的"下一词得分"。我们实现的第 2 课管道、第 3 课注意力、第 8 课零件，在这一刻全部接通。</p>
+  <span class="cite">——《书》§4.6, pp.135–139（列表 4.7）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>参数谜题：163M vs 124M</h2>
+  <p><code>sum(p.numel() for p in model.parameters())</code> 数出 <b>163,009,536</b>。但 GPT-2 官方是 1.24 亿。差的 39M 在哪？<span class="term">权重绑定<span class="en">（weight tying）</span></span>：</p>
+  <ul>
+    <li><code>tok_emb.weight</code> 形状 [50257, 768] —— 查表：ID → 向量</li>
+    <li><code>out_head.weight</code> 形状 [50257, 768] —— 打分：向量 → 词表 logits</li>
+  </ul>
+  <p>两个矩阵形状完全相同！原始 GPT-2 干脆<b>共用同一个矩阵</b>（一个当"字典"一个当"打分器"）：163M − 50257×768 ≈ <b>124,412,160</b> —— 对上了。书中实现保留独立两层（训练效果更好，现代 LLM 也常这样做），第 12 课加载 OpenAI 权重时会真正启用绑定。附带一笔账：163M 参数 × 4 字节（float32）= <b>621.83 MB</b>——"小"模型也不小。</p>
+  <span class="cite">——《书》§4.6, pp.139–141</span>
+
+  <table>
+    <tr><th>模型</th><th>emb_dim</th><th>层数</th><th>头数</th><th>参数</th></tr>
+    <tr><td>GPT-2 small（我们的）</td><td>768</td><td>12</td><td>12</td><td>124M</td></tr>
+    <tr><td>GPT-2 medium</td><td>1024</td><td>24</td><td>16</td><td>355M</td></tr>
+    <tr><td>GPT-2 large</td><td>1280</td><td>36</td><td>20</td><td>774M</td></tr>
+    <tr><td>GPT-2 XL</td><td>1600</td><td>48</td><td>25</td><td>1558M</td></tr>
+  </table>
+  <p class="cite">——《书》练习 4.2, p.141 —— 同一个 GPTModel 类，改配置即得四个尺寸。</p>
+
+  <h2><span class="secno">§4</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "TransformerBlock 内的正确顺序是？",
+          "options": ["归一注意力残差再归一前馈残差", "注意力归一残差再前馈归一残差", "残差归一注意力再残差前馈归一", "前馈残差归一再注意力残差归一"],
+          "answer": 0,
+          "explain": "Pre-LN 结构：norm→attn→加残差，norm→ffn→加残差。归一化在子层之前，训练更稳。"
+        },
+        {
+          "q": "注意力模块与 FFN 的分工是？",
+          "options": ["词间交流和逐词加工", "词间交流和逐词复制", "逐词加工和词间交流", "逐词压缩和逐词扩张"],
+          "answer": 0,
+          "explain": "注意力让词与词交流信息；FFN 对每个位置独立做非线性深加工。"
+        },
+        {
+          "q": "TransformerBlock 的输出形状如何？",
+          "options": ["与输入完全相同", "维度翻倍增长", "压缩为单个向量", "扩展为词表大小"],
+          "answer": 0,
+          "explain": "[b, T, 768] 进出不变（内容变）——这是能堆 12 层的前提。"
+        },
+        {
+          "q": "GPTModel 最终输出的形状是？",
+          "options": ["批次乘长度乘词表", "批次乘词表乘长度", "长度乘维度乘批次", "词表乘维度乘批次"],
+          "answer": 0,
+          "explain": "[batch, num_tokens, 50257]：每个位置对整个词表打分。"
+        },
+        {
+          "q": "163M 与 124M 之差的解释是？",
+          "options": ["权重绑定共享", "参数量化压缩", "dropout 的损耗", "训练中的剪枝"],
+          "answer": 0,
+          "explain": "原始 GPT-2 让 tok_emb 与 out_head 共用 [50257, 768] 矩阵，省约 38.6M 参数。"
+        },
+        {
+          "q": "163M 参数的 float32 模型约占多少内存？",
+          "options": ["622 兆字节", "155 兆字节", "2.4 吉字节", "78 兆字节"],
+          "answer": 0,
+          "explain": "163M × 4 字节 ≈ 621.83 MB。每个参数 4 字节是估算模型体积的基本功。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你拥有了一个完整、可运行的 GPT-2 124M 架构。能画出数据流（ID → 嵌入+位置 → 12×Block → LN → out_head → [b,T,50257]），并能解释 weight tying。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 10 课「让 GPT 开口说话」</strong><br>
+    模型现在是"植物人"——架构有了，脑子（训练）还是空白。下一课先让它说话（哪怕胡话）：自回归生成循环 generate_text_simple。对应书 §4.7。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    强烈建议此刻亲手跑一遍官方 ch04 notebook（模型定义 → 参数统计 → 打印 model 看结构），30 行代码立在屏幕上的成就感无价。跑不动就找我。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 9 课 · 主教材 §4.5–4.6 · <a href="../reference/gpt-architecture.html">架构速查表</a> · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch04" target="_blank">ch04</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

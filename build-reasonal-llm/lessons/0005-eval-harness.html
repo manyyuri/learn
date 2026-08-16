@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 5 课 · 评估 Harness — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 5 课 · 跑通 MATH-500：你的第一个准确率数字</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §3.2–3.3, §3.8–3.9</span>
+    <span class="chip">⏱ 25–35 分钟</span>
+    <span class="chip">🎯 收获：一条可复用的评估管线 + 两个反直觉的评估教训</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>上一课造好了尺子（verifier），这一课把它装上流水线：数据集 → prompt 模板 → 生成 → 判分 → 准确率。以后每一课的改进（CoT、投票、GRPO……）都要回到这条管线上验证有没有真提升。同时你会撞上两个工作里极其常见的坑：<strong>prompt 敏感性</strong>和<strong>小样本噪声</strong>。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>MATH-500：为什么是它</h2>
+
+  <p><a href="https://huggingface.co/datasets/HuggingFaceH4/MATH-500">MATH-500</a> 是从原版 MATH 数据集采样的 500 道题（该切分最初由 OpenAI 的 PRM800K 仓库提出）<span class="cite">BRM §3.8</span>。选它三个理由：</p>
+
+  <ol>
+    <li><b>大小合适</b>：500 题有统计意义，又不至于每次评估跑半天；</li>
+    <li><b>干净</b>：后面的训练集取自原 MATH 的不重叠子集，MATH-500 保持 held-out；</li>
+    <li><b>行业标准</b>：推理模型文献普遍用它，结果可直接对比。</li>
+  </ol>
+
+  <p>每条数据三个关键字段：<code>problem</code>（题面）、<code>answer</code>（标准答案）、<code>solution</code>（人工解题过程——本章不用，第 15 课蒸馏时会用到）<span class="cite">BRM §3.8</span>。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>Prompt 模板：让答案长在固定位置</h2>
+
+  <p>验证器期望 <code>\boxed{}</code> 格式，所以用模板明确要求<span class="cite">BRM §3.9, listing 3.13</span>：</p>
+
+<pre><code>def render_prompt(prompt):
+    return (
+        "You are a helpful math assistant.\n"
+        "Answer the question and write the final result on a new line as:\n"
+        "\\boxed{ANSWER}\n\n"
+        f"Question:\n{prompt}\n\nAnswer:"
+    )</code></pre>
+
+  <div class="callout warn">
+    <span class="co-label">教训一：模板不是中性的</span>书中实测（M4 芯片）：这个"逼短答案"的模板让 base 模型答 <code>\boxed{10}</code>——快，但<b>错</b>；而不加模板时模型写得长，反而答对 14/3。更狠的数据：**去掉模板 base 准确率 +50%，reasoning 模型 −40%**；把 "Question:" 换成 "Problem:"，base +20%，reasoning −30%。<span class="cite">BRM §3.9 侧栏</span><br><br>
+    结论：<strong>小模型对 prompt 措辞高度敏感；模板选择本身是一个要被评估的实验变量</strong>，没有免费午餐。
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>评估主循环</h2>
+
+  <p>核心逻辑 20 行——就是第 4 课流水线 × 500<span class="cite">BRM §3.9, listing 3.15</span>：</p>
+
+<pre><code>def evaluate_math500_stream(model, tokenizer, device, math_data, ...):
+    for i, row in enumerate(math_data, start=1):
+        prompt = render_prompt(row["problem"])          # ① 套模板
+        gen_text = generate_text_stream_concat(         # ② 生成（ch2 的函数）
+            model, tokenizer, prompt, device, max_new_tokens=512)
+        extracted = extract_final_candidate(gen_text)   # ③ 抽取
+        is_correct = grade_answer(extracted, row["answer"])  # ④⑤ 归一化+判分
+        num_correct += int(is_correct)
+        f.write(json.dumps({...}) + "\n")               # ⑥ 每题落盘 jsonl
+    print(f"Accuracy: {num_correct/num_examples*100:.1f}%")</code></pre>
+
+  <p>工程细节值得抄走：<b>逐题写 JSONL</b>（跑崩不丢结果、事后可逐题分析）、<b>ETA 进度</b>、<b>verbose 开关</b>（看 token 流确认没卡死）<span class="cite">BRM §3.9</span>。</p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>结果：base vs reasoning</h2>
+
+  <table>
+    <thead><tr><th>模型</th><th>样本数</th><th>准确率</th><th>耗时（对应硬件）</th></tr></thead>
+    <tbody>
+      <tr><td>base 0.6B</td><td>10</td><td>30%</td><td>0.4 min（M4）</td></tr>
+      <tr><td>reasoning 0.6B（官方）</td><td>10</td><td>90%（MPS 80%）</td><td>7 min（M4）</td></tr>
+      <tr><td>base 0.6B</td><td>500</td><td>15.3%</td><td>13.3 min（H100）</td></tr>
+      <tr><td>reasoning 0.6B（官方）</td><td>500</td><td>50.8%</td><td>185.4 min（H100）</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · <span class="cite">BRM table 3.1 及正文</span>；数值随 PyTorch 版本/设备浮动</p>
+
+  <p>三个观察：</p>
+  <ul>
+    <li><strong>推理版确实强</strong>（500 题上 15.3% → 50.8%）——这就是"官方用推理方法训练后"的差距，也是我们接下来 11 课要亲手复现的方向；</li>
+    <li><strong>代价是时长</strong>：推理版回答长得多，500 题从 13 分钟变 3 小时（batch 化脚本可压到 14.6 分钟<span class="cite">BRM §3.9 TIP</span>）——第 1 课说的"两个贵"在这里具象化了；</li>
+    <li><strong>10 题上的 30% ≠ 500 题的 15.3%</strong>——见下面教训二。</li>
+  </ul>
+
+  <div class="callout key">
+    <span class="co-label">教训二：小样本会骗人</span>10 题子集给 base 打出 30%，全集只有 15.3%——3 题的运气差就被放大成 15 个百分点。书里用 10 题是为了演示速度，<b>并明确提醒子集不一定有代表性</b>（练习 3.3 让你自己验证）。工作启示：汇报数字前先问"多少题、几次运行、方差多大"。
+  </div>
+
+  <div class="margin-note">
+    <span class="mn-label">🧰 工程锦囊</span>逐题 JSONL 落盘的另一个用途：跑完后用脚本统计"抽取失败率""平均答案长度""按题型/难度分层准确率"——第 14 课追踪 GRPO 训练指标时的套路与此同源。
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>评估管线 = 数据集 × prompt 模板 × 生成 × 验证器，产出准确率。两个铁律：模板本身是实验变量（对 base 和 reasoning 影响可能相反）；小样本数字不可信（30%@10 ≠ 15.3%@500）。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://huggingface.co/datasets/HuggingFaceH4/MATH-500">MATH-500 数据集卡</a>——看看真实数据长什么样、难度和学科分布。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0006-cot-prompting.html">CoT 提示</a>——进入 Stage 3：不动权重，第一招让模型"想清楚再答"。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想聊聊怎么把这条管线改造成你工作场景的评估（比如换成你自己的业务题库），直接说。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0004-math-verifier.html">← 第 4 课</a>
+    <a class="nav-next" href="0006-cot-prompting.html">第 6 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 5 课检索练习",
+    questions: [
+      {
+        question: "评估管线中 render_prompt 模板的直接目的是什么？",
+        options: ["让模型答得更慢", "让答案可被自动抽取", "让答案更长更详细", "让模型使用更多词汇"],
+        answer: 1,
+        explain: "BRM §3.4/3.9：显式要求 \\boxed{ANSWER} 格式，验证器才能稳定抽取。副产品：模板措辞本身会显著改变准确率。"
+      },
+      {
+        question: "base 模型 10 题 30% 但 500 题 15.3%，主要说明什么？",
+        options: ["硬件影响了结果", "模型在偷懒", "小样本估计不可靠", "验证器有 bug"],
+        answer: 2,
+        explain: "10 题样本太小，单题运气（±10 个百分点/题）被放大。书里明说子集不一定代表全集（练习 3.3）。"
+      },
+      {
+        question: "官方 reasoning 变体在 500 题上 50.8%，代价是什么？",
+        options: ["权重体积更大", "词表规模翻倍", "回答更短更快", "生成时间大幅变长"],
+        answer: 3,
+        explain: "BRM §3.9：推理版输出长得多——500 题 H100 上 13.3 min → 185.4 min。准确率换算力，第 1 课的两个贵。"
+      },
+      {
+        question: "把模板里 Question 改成 Problem，书中实测对 base 模型的影响是？",
+        options: ["准确率约升两成", "准确率约降三成", "准确率保持不变", "输出直接无法解析"],
+        answer: 0,
+        explain: "BRM §3.9 侧栏：base +20%（更贴近训练语料格式），但 reasoning 版 −30%。同一改动对不同模型方向相反。"
+      },
+      {
+        question: "逐题把结果写进 JSONL 文件的主要好处是？",
+        options: ["加快生成速度", "节省内存占用", "可事后逐题分析", "自动提高准确率"],
+        answer: 2,
+        explain: "BRM §3.9：跑崩不丢数据；事后可统计抽取失败、答案长度、分层准确率——评估的可观测性来自日志。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

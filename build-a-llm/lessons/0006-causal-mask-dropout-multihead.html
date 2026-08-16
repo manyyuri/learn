@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 6 课 · 因果掩码、Dropout 与多头注意力</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 6 课 · Build a LLM From Scratch · 对应书 §3.5–3.6</p>
+  <h1>因果掩码、Dropout 与多头注意力</h1>
+  <p class="subtitle">堵住未来、防止过拟合、拆成多头——三步改造后，我们拿到可以直接插进 GPT 的最终零件：MultiHeadAttention。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：q/k/v 三剑客",
+      "questions": [
+        {
+          "q": "注意力分数用什么计算？",
+          "options": ["查询与键点积", "键与值点积", "查询与值点积", "键与键点积"],
+          "answer": 0,
+          "explain": "q·k 匹配后 softmax 加权取 v。"
+        },
+        {
+          "q": "softmax 前除以 √d_k 是为了？",
+          "options": ["保住可用梯度", "压缩参数总量", "统一向量长度", "加快收敛速度"],
+          "answer": 0,
+          "explain": "防止大点积让 softmax 退化成阶跃、梯度归零。"
+        },
+        {
+          "q": "W_q、W_k、W_v 何时被更新？",
+          "options": ["训练的反向传播", "推理的每一步", "分词的阶段里", "编码输入的时候"],
+          "answer": 0,
+          "explain": "它们是可训练参数，只在训练时优化；推理时冻结使用。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>因果掩码：不许偷看未来</h2>
+  <p>GPT 是自回归模型：预测第 3 个词时只许看前 2 个词。但目前的注意力矩阵是全对称的——"journey" 能看到后面 "one step" 的信息，训练时等于<b>抄答案</b>。<span class="term">因果注意力<span class="en">（causal attention）</span></span>的解法简单粗暴：把注意力矩阵<b>对角线以上全部屏蔽</b>（书 §3.5.1，图 3.19–3.21）。</p>
+  <p>工程上最优雅的做法不是"置零再重归一化"，而是利用 softmax 的数学性质——<b>softmax 之前</b>把上三角填成 −∞：</p>
+
+<pre><code class="language-python">mask = torch.triu(torch.ones(6, 6), diagonal=1)      # 上三角为 1
+attn_scores = queries @ keys.transpose(1, 2)
+attn_scores.masked_fill_(mask.bool(), -torch.inf)    # 未来位置 → −∞
+attn_weights = torch.softmax(attn_scores / d_k**0.5, dim=-1)
+# 第 1 行 [1.0, 0, 0, 0, 0, 0] —— Your 只能看自己
+# 第 2 行 [0.5517, 0.4483, 0, 0, 0, 0] —— journey 看 Your 和自己</code></pre>
+
+  <p>因为 e^(−∞) = 0，被屏蔽位置在 softmax 里<b>自然归零</b>，无需二次归一化——一步到位且无信息泄漏（书 §3.5.1 侧栏"信息泄漏"专门论证了这点）。</p>
+  <span class="cite">——《书》§3.5.1, pp.90–94</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>Dropout：随机关闭注意力</h2>
+  <p><span class="term">Dropout<span class="en">（dropout）</span></span>是深度学习的经典抗过拟合手段：训练时随机"关掉"一部分单元，逼模型不依赖任何单一路径。在 GPT 里通常施加在<b>注意力权重算完之后</b>（书采用实践更常见的这种变体）：以概率 p 随机置零部分权重，剩余权重 ×1/(1−p) 放大补偿，保持总量平衡。教学示例用 50% 率，训练真模型时用 0.1–0.2。</p>
+
+<pre><code class="language-python">dropout = nn.Dropout(0.5)        # 训练时约一半权重被置零、其余×2
+attn_weights = dropout(attn_weights)</code></pre>
+
+  <span class="cite">——《书》§3.5.2, pp.94–96</span>
+
+  <h2><span class="secno">§3</span>紧凑版 CausalAttention 类</h2>
+  <p>把掩码 + dropout + 批量支持（第 2 课 DataLoader 吐出的 [batch, tokens, dim]）整合进一个类：</p>
+
+<pre><code class="language-python">class CausalAttention(nn.Module):
+    def __init__(self, d_in, d_out, context_length, dropout, qkv_bias=False):
+        super().__init__()
+        self.d_out = d_out
+        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_key   = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_value = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('mask',                       # 掩码不参与训练
+            torch.triu(torch.ones(context_length, context_length), diagonal=1))
+
+    def forward(self, x):                    # x: [b, num_tokens, d_in]
+        b, num_tokens, d_in = x.shape
+        keys    = self.W_key(x)              # [b, num_tokens, d_out]
+        queries = self.W_query(x)
+        values  = self.W_value(x)
+        attn_scores = queries @ keys.transpose(1, 2)       # [b, T, T]
+        attn_scores.masked_fill_(                          # 只屏蔽前 num_tokens
+            self.mask.bool()[:num_tokens, :num_tokens], -torch.inf)
+        attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        return attn_weights @ values         # [b, num_tokens, d_out]</code></pre>
+
+  <div class="sidenote"><code>register_buffer</code>（书 p.97）登记一个<b>不算参数</b>、但会随模型一起搬运的张量（比如移到 GPU 时自动跟着走）——掩码正是这种"随行工具"。GPT-2 的 qkv 偏置为 False（qkv_bias=False），这是对原架构的沿用。</div>
+  <span class="cite">——《书》§3.5.3, pp.96–98（列表 3.3）</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>多头注意力：并联多双眼睛</h2>
+  <p>单头注意力只有一副"q/k/v 眼镜"——它学到的关注模式是单一的。<span class="term">多头注意力<span class="en">（multi-head attention）</span></span>把机制拆成 num_heads 份并行，每头有独立的投影权重，各自关注不同侧面（语法关系、指代关系、语义相似……），最后把各头输出拼接：</p>
+
+  <table>
+    <tr><th>两种实现</th><th>思路</th><th>特点</th></tr>
+    <tr><td><code>MultiHeadAttentionWrapper</code></td><td>堆叠多个 <code>CausalAttention</code> 实例，输出 <code>torch.cat([...], dim=-1)</code></td><td>直观但串行、低效</td></tr>
+    <tr><td><code>MultiHeadAttention</code>（最终版）</td><td>一个大 W 投影 → <code>.view</code> 拆成头 → 各头并行算注意力 → 拼回</td><td>单类集成、矩阵化高效</td></tr>
+  </table>
+
+  <p>最终版的关键操作（列表 3.5）：<code>head_dim = d_out // num_heads</code>，投影后的 (b, T, d_out) 张量被 <code>.view</code> 重塑成 (b, T, num_heads, head_dim)、再 <code>.transpose</code> 成 (b, num_heads, T, head_dim)，于是矩阵乘法自动在<b>每个头上并行</b>执行。GPT-2 的配置：768 维 ÷ 12 头 = 每头 64 维。</p>
+
+<pre><code class="language-python">class MultiHeadAttention(nn.Module):
+    def __init__(self, d_in, d_out, context_length, dropout, num_heads, qkv_bias=False):
+        super().__init__()
+        assert d_out % num_heads == 0, "d_out 必须能被 num_heads 整除"
+        self.head_dim = d_out // num_heads
+        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)   # 一次大投影
+        # ... W_key / W_value / out_proj / dropout / mask 同理
+    def forward(self, x):
+        # 投影 → reshape (b,T,h,hd) → transpose (b,h,T,hd)
+        # → 注意力（掩码 + 缩放 + dropout）→ 拼回 (b, T, d_out)</code></pre>
+
+  <span class="cite">——《书》§3.6, pp.98–107（列表 3.4、3.5）</span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 多头注意力的计算流",
+      "intro": "把 MultiHeadAttention.forward 的关键步骤排序",
+      "items": [
+        "一次大投影：x 分别乘 W_q、W_k、W_value → (b, T, d_out)",
+        ".view 拆头：重塑为 (b, T, num_heads, head_dim)",
+        ".transpose 换轴：变成 (b, num_heads, T, head_dim)",
+        "各头并行：q·k 打分 + 因果掩码 + 缩放 softmax + dropout",
+        "加权取值 v，拼回 (b, T, d_out)，过 out_proj 输出"
+      ],
+      "success": "正确！第 3 章通关。",
+      "explain": "要点：先投影再拆头（而非每头独立投影）→ 矩阵乘法天然并行 → 高效。这个类将在第 8 课被直接装配进 Transformer 块。"
+    }
+    </script>
+  </div>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题 · 第 3 章收官",
+      "questions": [
+        {
+          "q": "因果掩码屏蔽的是哪部分？",
+          "options": ["对角线以上区域", "对角线以下区域", "整条主对角线", "随机选择的位置"],
+          "answer": 0,
+          "explain": "上三角（未来的词）被填 −∞，softmax 后归零——每个词只能看自己和过去。"
+        },
+        {
+          "q": "为什么用 −∞ 而不是直接置零？",
+          "options": ["softmax 自动归零", "计算速度更快些", "省去存储空间", "避免数值下溢出"],
+          "answer": 0,
+          "explain": "e^(−∞)=0，被屏蔽项在 softmax 中自然消失，且无需二次归一化、无信息泄漏。"
+        },
+        {
+          "q": "dropout 施加的时机和作用是？",
+          "options": ["训练时随机失活抗过拟合", "推理时随机失活提速度", "训练时裁剪梯度防爆表", "推理时压缩模型的参数"],
+          "answer": 0,
+          "explain": "仅训练期生效：随机置零部分注意力权重（此处约 0.1–0.2 概率），剩余权重按 1/(1−p) 放大。"
+        },
+        {
+          "q": "register_buffer 登记的张量特点是？",
+          "options": ["随模型搬迁不训练", "参与训练会更新", "存于磁盘不加载", "独立于设备之外"],
+          "answer": 0,
+          "explain": "如因果掩码：不算参数（不优化），但随 .to(device) 一起搬运，避免设备不匹配。"
+        },
+        {
+          "q": "多头注意力『多』在哪里？",
+          "options": ["多组独立投影权重", "多层堆叠的网络结构", "多次重复同头计算", "多个词表拼接使用"],
+          "answer": 0,
+          "explain": "每头有独立的 q/k/v 投影（或大投影后拆分），各自学习不同的关注模式，输出拼接。"
+        },
+        {
+          "q": "GPT-2 每个头的维度是多少？",
+          "options": ["64 维（12 头）", "96 维（8 头）", "768 维（12 头）", "128 维（6 头）"],
+          "answer": 0,
+          "explain": "768 ÷ 12 头 = 每头 64 维。总计算量与单头 768 维相当，但表达力更强。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：第 3 章通关！你能解释"GPT 为什么不能偷看未来"（−∞ 掩码）、"dropout 为什么 ×2 补偿"、以及"多头为什么先投影再拆头"。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 7 课「PyTorch 检查点」⭐</strong><br>
+    后面全是 PyTorch 代码课了。零基础不影响前几课，但从第 8 课起必须会看张量操作。这一课速成：张量、autograd、<code>nn.Module</code>、训练循环——正好对应书附录 A。已会的题可以快进，把它当摸底考。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    多头的 reshape/transpose 是全书最绕的张量操作——在草稿纸上画出 (b, T, 12, 64) → (b, 12, T, 64) 的形状变化会有奇效。有疑问随时来找我。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 6 课 · 主教材 §3.5–3.6 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch03" target="_blank">ch03</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

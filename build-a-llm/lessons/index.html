@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课程导航 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Build a Large Language Model (From Scratch) · 中文精讲课</p>
+  <h1>课程导航</h1>
+  <p class="subtitle">16 课走完从 token 到 ChatGPT 的全程 · 主教材：Sebastian Raschka《从零开始构建大型语言模型》(Manning)</p>
+
+  <h2>第一幕 · 宏观图景</h2>
+  <table class="nav">
+    <tr><th>课</th><th>主题</th><th>对应书</th><th>核心收获</th></tr>
+    <tr><td><a href="0001-llm-big-picture.html">01</a></td><td><a href="0001-llm-big-picture.html">LLM 全景图</a></td><td>第 1 章</td><td>两阶段训练、GPT 解剖图、为什么从零构建</td></tr>
+  </table>
+
+  <h2>第二幕 · 数据管道（第 2 章）</h2>
+  <table class="nav">
+    <tr><td><a href="0002-tokenization-basics.html">02</a></td><td><a href="0002-tokenization-basics.html">分词基础</a></td><td>§2.1–2.4</td><td>文字 → token ID，词表，&lt;|unk|&gt; / &lt;|endoftext|&gt;</td></tr>
+    <tr><td><a href="0003-bpe-sliding-window-embeddings.html">03</a></td><td><a href="0003-bpe-sliding-window-embeddings.html">BPE · 滑动窗口 · 嵌入</a></td><td>§2.5–2.8</td><td>tiktoken、Dataset/DataLoader、nn.Embedding、位置嵌入</td></tr>
+  </table>
+
+  <h2>第三幕 · 注意力（第 3 章）</h2>
+  <table class="nav">
+    <tr><td><a href="0004-attention-intuition.html">04</a></td><td><a href="0004-attention-intuition.html">注意力直觉</a></td><td>§3.1–3.3</td><td>点积打分 → softmax → 加权求和；RNN 的缺陷</td></tr>
+    <tr><td><a href="0005-qkv-scaled-dot-product.html">05</a></td><td><a href="0005-qkv-scaled-dot-product.html">QKV 与缩放点积</a></td><td>§3.4</td><td>q/k/v 类比、可训练权重、√d_k 的原因</td></tr>
+    <tr><td><a href="0006-causal-mask-dropout-multihead.html">06</a></td><td><a href="0006-causal-mask-dropout-multihead.html">因果掩码 · dropout · 多头</a></td><td>§3.5–3.6</td><td>−∞ 掩码、MultiHeadAttention 最终版</td></tr>
+  </table>
+
+  <h2>第四幕 · 造出 GPT（第 4 章）</h2>
+  <table class="nav">
+    <tr><td><a href="0007-pytorch-checkpoint.html">07</a> ⭐</td><td><a href="0007-pytorch-checkpoint.html">PyTorch 检查点</a></td><td>附录 A</td><td>张量 / autograd / nn.Module / 训练循环五步咒</td></tr>
+    <tr><td><a href="0008-gpt-skeleton-components.html">08</a></td><td><a href="0008-gpt-skeleton-components.html">GPT 骨架</a></td><td>§4.1–4.4</td><td>配置字典、LayerNorm、GELU、FFN、残差连接</td></tr>
+    <tr><td><a href="0009-transformer-block-gpt-assembly.html">09</a></td><td><a href="0009-transformer-block-gpt-assembly.html">总装 GPT</a></td><td>§4.5–4.6</td><td>TransformerBlock、GPTModel、163M vs 124M（权重绑定）</td></tr>
+    <tr><td><a href="0010-autoregressive-generation.html">10</a></td><td><a href="0010-autoregressive-generation.html">自回归生成</a></td><td>§4.7</td><td>生成循环、贪心解码、未训练模型的胡话</td></tr>
+  </table>
+
+  <h2>第五幕 · 训练与增强（第 5 章）</h2>
+  <table class="nav">
+    <tr><td><a href="0011-pretraining-loss-loop.html">11</a> ⭐</td><td><a href="0011-pretraining-loss-loop.html">预训练</a></td><td>§5.1–5.2</td><td>交叉熵、困惑度、过拟合演示、AdamW</td></tr>
+    <tr><td><a href="0012-decoding-openai-weights.html">12</a></td><td><a href="0012-decoding-openai-weights.html">解码策略 · 加载 GPT-2 权重</a></td><td>§5.3–5.4</td><td>温度 / top-k、state_dict、灌入 OpenAI 权重</td></tr>
+  </table>
+
+  <h2>第六幕 · 微调落地（第 6–7 章、附录 D/E）</h2>
+  <table class="nav">
+    <tr><td><a href="0013-classification-finetuning.html">13</a></td><td><a href="0013-classification-finetuning.html">分类微调</a></td><td>第 6 章</td><td>换头 + 冻结 + 最后 token，97.5% 垃圾短信分类器</td></tr>
+    <tr><td><a href="0014-instruction-finetuning.html">14</a></td><td><a href="0014-instruction-finetuning.html">指令微调</a></td><td>第 7 章</td><td>Alpaca 格式、-100 屏蔽、LLM-as-judge</td></tr>
+    <tr><td><a href="0015-training-stability-toolkit.html">15</a></td><td><a href="0015-training-stability-toolkit.html">训练稳定三件套</a></td><td>附录 D</td><td>warmup、余弦衰减、梯度裁剪</td></tr>
+    <tr><td><a href="0016-lora-efficient-finetuning.html">16</a> 🎓</td><td><a href="0016-lora-efficient-finetuning.html">LoRA 高效微调</a></td><td>附录 E</td><td>W+BA、2% 参数微调、推理零开销合并</td></tr>
+  </table>
+
+  <h2>参考文档</h2>
+  <ul>
+    <li><a href="../reference/gpt-architecture.html">GPT 架构速查表</a> —— 配置、数据流、张量形状、参数账本</li>
+    <li><a href="../reference/attention.html">注意力速查表</a> —— 演化阶梯、公式、q/k/v 类比</li>
+    <li><a href="../reference/tokenization.html">分词管道速查</a> —— BPE、特殊 token、滑动窗口</li>
+    <li><a href="../reference/training-and-finetuning.html">训练与微调对比</a> —— 预训练 vs 分类/指令/LoRA 决策表</li>
+    <li><a href="../reference/glossary.html">术语表</a> —— 全书统一译法（中文 + English）</li>
+  </ul>
+
+  <h2>外部资源</h2>
+  <ul>
+    <li>官方代码仓库（全部可运行 notebook）：<a href="https://github.com/rasbt/LLMs-from-scratch" target="_blank">github.com/rasbt/LLMs-from-scratch</a></li>
+    <li>必读论文：Attention Is All You Need (<a href="https://arxiv.org/abs/1706.03762" target="_blank">1706.03762</a>) · GPT-2 (<a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf" target="_blank">PDF</a>) · GPT-3 (<a href="https://arxiv.org/abs/2005.14165" target="_blank">2005.14165</a>) · LoRA (<a href="https://arxiv.org/abs/2106.09685" target="_blank">2106.09685</a>)</li>
+  </ul>
+
+  <footer>
+    <p>Build a LLM From Scratch · 学习工作区 · macOS CPU/MPS 即可跑完全部代码</p>
+  </footer>
+</main>
+</body>
+</html>

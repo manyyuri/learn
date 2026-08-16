@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 3 课 · KV Cache 与生成加速 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 3 课 · 从 5 到 68 tokens/秒：KV Cache 与 torch.compile</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §2.8–2.9</span>
+    <span class="chip">⏱ 20–30 分钟</span>
+    <span class="chip">🎯 收获：让评估与推理工作流快一个数量级的两个工程招</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>第 2 课的裸循环在 CPU 上只有 ~5 tokens/秒。后面每一章都要生成大量文本——评估要生成几百个答案、self-consistency 一题采 16 个解、GRPO 一个 prompt 要采一打 rollout。<strong>每 token 的延迟直接决定你的实验吞吐</strong>。两招工程优化，提速 13 倍起。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>裸循环慢在哪：重复计算</h2>
+
+  <p>回看第 2 课的循环：每生成一个新 token，都要把<strong>整个序列（prompt + 已生成部分）重新喂进模型做完整前向传播</strong>。但注意——序列里除了最后那个新 token，其余所有 token 的中间计算结果和上一轮<b>一模一样</b>，却被原样重算了一遍<span class="cite">BRM §2.8</span>。</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">轮次 1<small>算 6 个 token</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">轮次 2<small>重算 7 个（6 个白算）</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">轮次 3<small>重算 8 个（7 个白算）</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">总工作量 ≈ O(n²)</div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 无缓存解码：生成长度翻倍，总计算量约翻四倍。<span class="cite">BRM §2.8</span></div>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>KV Cache：把中间结果存起来</h2>
+
+  <p>Transformer 注意力里每个 token 都会产生 Key/Value 向量。<span class="term">KV cache</span> 的思路：第一轮照常算完整输入，把每层的 K、V <strong>缓存</strong>；之后每轮只把<strong>新 token</strong> 喂进模型，旧 token 的 K/V 直接查缓存——省掉全部重复计算。总复杂度从 O(n²) 降到约 O(n)<span class="cite">BRM §2.8</span>。</p>
+
+  <p>代码改动小得惊人——和第 2 课的函数几乎逐行相同，只加了 cache<span class="cite">BRM §2.8, listing 2.4</span>：</p>
+
+<pre><code>from reasoning_from_scratch.qwen3 import KVCache
+
+@torch.inference_mode()
+def generate_text_basic_stream_cache(model, token_ids, max_new_tokens, eos_token_id=None):
+    model.eval()
+    cache = KVCache(n_layers=model.cfg["n_layers"])   # 每层一份 K/V 缓存
+    model.reset_kv_cache()
+    out = model(token_ids, cache=cache)[:, -1]        # 首轮：完整输入 + 填充缓存
+    for _ in range(max_new_tokens):
+        next_token = torch.argmax(out, dim=-1, keepdim=True)
+        if eos_token_id is not None and torch.all(next_token == eos_token_id):
+            break
+        yield next_token
+        out = model(next_token, cache=cache)[:, -1]   # 之后：只喂新 token！</code></pre>
+
+  <p><strong>重要 sanity check</strong>：加缓存后生成的文本与不加时<b>逐字相同</b>——KV cache 是纯计算复用，不改变任何数学结果。如果你加了缓存输出变了，说明实现有 bug。<span class="cite">BRM §2.8</span></p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>torch.compile：把 Python 开销压掉</h2>
+
+  <p><span class="term">torch.compile</span> 分析模型计算图，把成组操作融合成优化内核，减少 Python 解释开销——对"同一模型反复调用"的生成循环收益明显<span class="cite">BRM §2.9</span>：</p>
+
+<pre><code>model_compiled = torch.compile(model)   # 一行</code></pre>
+
+  <p>两个坑：① <b>首次运行慢</b>（编译需要时间），基准测试要跑 3 次丢弃第一次（warm-up）；② <b>Apple Silicon 遇 InductorError → 升级 PyTorch ≥ 2.9</b>。<span class="cite">BRM §2.9</span></p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>战果：书中的基准数字</h2>
+
+  <table>
+    <thead><tr><th>配置</th><th>Mac Mini M4 CPU</th><th>Mac Mini M4 GPU</th><th>NVIDIA H100</th></tr></thead>
+    <tbody>
+      <tr><td>裸循环</td><td>5 t/s</td><td>27 t/s</td><td>51 t/s</td></tr>
+      <tr><td>裸循环 + compile</td><td>6 t/s</td><td>43 t/s</td><td>164 t/s</td></tr>
+      <tr><td>KV cache</td><td>28 t/s</td><td>41 t/s</td><td>48 t/s</td></tr>
+      <tr><td><b>KV cache + compile</b></td><td><b>68 t/s</b></td><td><b>71 t/s</b></td><td><b>141 t/s</b></td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · 单条 prompt（batch=1）实测。<span class="cite">BRM table 2.1</span></p>
+
+  <div class="callout note">
+    <span class="co-label">反直觉？CPU 追平 GPU</span>这个 0.6B 模型太小、batch=1 太瘦，GPU 喂不饱；且书的 KV cache 用 <code>torch.cat</code> 按需增长（省内存但 GPU 上偏慢），而非预分配到最大上下文。模型越大、batch 越大，GPU 优势才拉开。<span class="cite">BRM §2.9</span>——对你的启示：<strong>M1 Pro 做本书全部实验完全够用。</strong>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>KV cache 存旧 token 的注意力中间量，每轮只算新 token（O(n²)→O(n)，输出不变）；torch.compile 融合算子压 Python 开销（首次慢，之后快）。两者叠加 ≈ 13 倍。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：Raschka 免费文章 <a href="https://magazine.sebastianraschka.com/p/coding-the-kv-cache-in-llms">Understanding and Coding the KV Cache in LLMs from Scratch</a>——想深挖注意力机制层面原理时读它。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0004-math-verifier.html">数学验证器</a>——进入 Stage 2：怎么自动判断"模型答对了没有"。这是后面一切推理改进的度量衡。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：在你机器上实测的 tokens/秒 和书里差多少？贴出来我帮你分析是设备还是配置问题。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0002-load-model-and-generation-loop.html">← 第 2 课</a>
+    <a class="nav-next" href="0004-math-verifier.html">第 4 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 3 课检索练习",
+    questions: [
+      {
+        question: "无 KV cache 的解码总复杂度约是多少（n 为生成 token 数）？",
+        options: ["大约 O(n)", "大约 O(n²)", "大约 O(log n)", "大约 O(1)"],
+        answer: 1,
+        explain: "BRM §2.8：每轮重算整条序列，长度递增 → 总量约平方级；KV cache 后降为约线性。"
+      },
+      {
+        question: "加了 KV cache 之后，生成文本应该有什么变化？",
+        options: ["文本更加流畅", "文本完全相同", "文本略微变短", "文本随机改变"],
+        answer: 1,
+        explain: "BRM §2.8：KV cache 只复用中间结果，数学不变。输出变了 = 实现 bug——这是书中强调的 sanity check。"
+      },
+      {
+        question: "KV cache 方案下，第二次及以后的迭代喂给模型的是什么？",
+        options: ["完整序列重算", "新 token 加缓存", "随机一个窗口", "只喂 prompt"],
+        answer: 1,
+        explain: "BRM §2.8 listing 2.4：首轮喂全序列并填充缓存；之后 model(next_token, cache=cache) 只算新 token。"
+      },
+      {
+        question: "torch.compile 第一次运行反而更慢，原因是？",
+        options: ["权重在重新加载", "首次触发编译", "缓存尚未被命中", "设备正在预热"],
+        answer: 1,
+        explain: "BRM §2.9：编译和优化发生在首次执行——所以基准测试跑 3 次丢弃 warm-up。"
+      },
+      {
+        question: "为什么表里 0.6B 模型 CPU 能追平 GPU？",
+        options: ["模型小 batch 为一", "CPU 主频高得多", "GPU 显存受限", "编译优化 CPU 专属"],
+        answer: 0,
+        explain: "BRM §2.9：小模型 + batch=1 喂不饱 GPU；且书中 KV cache 按需增长而非预分配，GPU 上不占优。模型/batch 变大后差距会拉开。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

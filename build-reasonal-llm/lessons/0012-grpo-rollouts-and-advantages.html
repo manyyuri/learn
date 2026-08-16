@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 12 课 · GRPO 实操 I — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 12 课 · GRPO 实操 I：Rollouts、奖励与优势</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §6.3–6.7</span>
+    <span class="chip">⏱ 35–45 分钟</span>
+    <span class="chip">🎯 收获：GRPO 六阶段的前三个——采样、打分、组内相对化</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>GRPO 六阶段流水线（采样 rollouts → 算奖励 → 算优势 → 算 logprob → 拼损失 → 更新权重）的前三阶段，全是你已有技能的重组：第 7 课的采样、第 4 课的验证器、一个新公式。这课走完，GRPO 就只剩"拼损失 + 训练循环"了。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>训练集：12000 道数学题</h2>
+
+  <p>MATH 全集 12,500 题 = <b>MATH-500（评估）+ 12,000 训练题</b>，两块互不重叠——防数据泄漏，和第 5 课的教训呼应<span class="cite">BRM §6.4</span>。每题字段：`problem`（prompt）、`answer`（验证目标）、`solution`（参考解法，<b>训练不用</b>——不想把模型锁死在特定解法风格上，让它自由探索解空间）。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>阶段一：采样 rollouts</h2>
+
+  <p>为什么不能直接复用第 7 课的 <code>generate_text_stream_concat_flex</code>？因为它标了 <code>@inference_mode</code>——彻底关闭梯度追踪，<b>之后没法 backward</b>。训练版改用 <code>@torch.no_grad()</code>（只关梯度、不开推理模式）<span class="cite">BRM §6.5</span>：</p>
+
+<pre><code>@torch.no_grad()
+def sample_response(model, tokenizer, prompt, device,
+                    max_new_tokens=512, temperature=0.8, top_p=0.9):
+    input_ids = torch.tensor(tokenizer.encode(prompt), device=device)
+    cache = KVCache(n_layers=model.cfg["n_layers"])
+    model.reset_kv_cache()
+    logits = model(input_ids.unsqueeze(0), cache=cache)[:, -1]
+    generated = []
+    for _ in range(max_new_tokens):
+        probas = top_p_filter(torch.softmax(logits / temperature, dim=-1), top_p)
+        next_token = torch.multinomial(probas.cpu(), num_samples=1).to(device)
+        token_id = next_token.item()
+        generated.append(token_id)
+        if token_id == tokenizer.eos_token_id:
+            break
+        logits = model(next_token, cache=cache)[:, -1]
+    full_token_ids = torch.cat([input_ids, torch.tensor(generated, device=device)])
+    return full_token_ids, input_ids.numel(), tokenizer.decode(generated)
+    #              ↑ 完整 token 序列   ↑ prompt 长度    ↑ 答案文本</code></pre>
+
+  <p>三个细节<span class="cite">BRM §6.5</span>：① 返回 <b>token IDs 和 prompt 长度</b>——后面算 sequence logprob 直接用，不用重新分词；② 回答里<b>保留 &lt;|endoftext|&gt;</b>——不保留的话，长训练后模型会"忘记"怎么停；③ 采样逻辑与第 7 课完全等价（同种子同参数 → 同输出）。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>阶段二：奖励 = 验证器 + 格式约束</h2>
+
+<pre><code>def reward_rlvr(answer_text, ground_truth):
+    extracted = extract_final_candidate(answer_text, fallback=None)  # 关键：None
+    if not extracted:
+        return 0.0
+    return float(grade_answer(extracted, ground_truth))</code></pre>
+
+  <p><code>fallback=None</code> 是唯一的改动：必须 <code>\boxed{}</code> 格式才给抽答案——<b>隐性格式奖励</b>：答案既要对、又要装在盒子里，奖励才是 1<span class="cite">BRM §6.6</span>。四个 rollout 的实测：</p>
+
+  <table>
+    <thead><tr><th>rollout</th><th>奖励</th><th>原因</th></tr></thead>
+    <tbody>
+      <tr><td><code>\boxed{83}</code></td><td>1.0 ✅</td><td>对 + 有盒子</td></tr>
+      <tr><td><code>The correct answer is \boxed{83}</code></td><td>1.0 ✅</td><td>对 + 有盒子</td></tr>
+      <tr><td><code>The final answer is 83</code></td><td>0.0 ❌</td><td>对了但<b>没盒子</b></td></tr>
+      <tr><td><code>We get \boxed{38}</code></td><td>0.0 ❌</td><td>有盒子但<b>错了</b></td></tr>
+    </tbody>
+  </table>
+
+  <div class="margin-note">
+    <span class="mn-label">R1 的教训</span>DeepSeek-R1 也试过给中间步骤打分（process reward model），<b>失败</b>——只奖励最终答案正确性效果更好。<span class="cite">BRM §6.6</span>
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>阶段三：rewards → advantages</h2>
+
+  <p>奖励只说"这个 rollout 多好"，<span class="term">advantage</span> 说"<b>相对同组其他 rollout</b> 多好"——一行公式<span class="cite">BRM §6.7</span>：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">rewards<small>[1, 1, 0, 0]</small></div>
+      <div class="arrow">−组均值 ÷组标准差→</div>
+      <div class="stage hl">advantages<small>[+0.87, +0.87, −0.87, −0.87]</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · Aᵢ = (rᵢ − μ) / (σ + ε)。ε=1e-4 防除零。</div>
+  </div>
+
+  <p>三条性质，直接决定训练行为：</p>
+  <ol>
+    <li><b>优势正 → 提升该 rollout 的生成概率；负 → 压制；≈0 → 几乎不动</b>。梯度更新的方向和力度都由它缩放。</li>
+    <li><b>全组同分（全对或全错）→ 优势全 0 → 梯度全 0 → 本题不更新</b>。太难的题（模型从不对）和太简单的题（模型总对）都学不到东西——GRPO 只在<b>模型"有时对"的难度区</b>发力。这就是为什么 base 模型 15% 的起点反而够用：采样 N 次，总有蒙对的时候。</li>
+    <li>标准化让不同题的信号<b>量纲一致</b>：不管这组是 2/4 对还是 7/8 对，优势幅度可比。</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="co-label">GR 的含义</span>GRPO = <b>G</b>roup <b>R</b>elative Policy Optimization："组相对"就是这一步——同一 prompt 采一组回答，组内互相比。基线（baseline）不是训出来的价值模型，就是<b>这组自己的平均分</b>。第 11 课说的"省掉价值模型"，省的正是这里。
+  </div>
+
+  <div class="callout note">
+    <span class="co-label">工作联想</span>书练习 6.1：给"对但没盒子"的回答 0.5 分（部分学分）——这就是给奖励塑形。下一章你会看到 DeepSeek-R1 真实用了<b>格式奖励 + 语言一致性奖励</b>等更精细的 shaping，思想同源。
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>Rollout = 一次完整采样（no_grad 版，留 EOS）；奖励 = 验证器 + boxed 格式门槛（0/1）；优势 = 组内标准化（同分零梯度，只在"有时对"的题上学习）。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0013-grpo-loss-and-training-loop.html">GRPO 实操 II：损失与训练循环</a>——sequence logprob（第 9 课的 sum 版）、policy gradient 损失、8 阶段训练循环，最后看 15%→47% 的成绩单。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>："全组零奖励就白采样了吗"（好问题，答案：是，但概率信息仍在）、"advantage 和 reward 能不能混用"——尽管来。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0011-rl-primer.html">← 第 11 课</a>
+    <a class="nav-next" href="0013-grpo-loss-and-training-loop.html">第 13 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 12 课检索练习",
+    questions: [
+      {
+        question: "为什么不能用第 7 课的生成函数直接采 rollout？",
+        options: ["速度太慢无法接受", "inference_mode 阻断反向传播", "它不支持温度参数", "输出不带 token 序列"],
+        answer: 1,
+        explain: "BRM §6.5：@inference_mode 彻底关梯度，训练需要 backward；改用 @torch.no_grad() 只在采样时关梯度。"
+      },
+      {
+        question: "reward_rlvr 中 fallback=None 起什么作用？",
+        options: ["答案抽取失败时重试", "要求 boxed 格式才有奖励", "关闭答案标准化步骤", "允许任何格式的答案"],
+        answer: 1,
+        explain: "BRM §6.6：无盒子抽不出候选 → 奖励 0——把格式合规隐性地并入奖励。"
+      },
+      {
+        question: "一组 rollouts 全部得 0 分，advantages 和梯度分别是？",
+        options: ["优势为负梯度向下", "优势为零梯度为零", "优势为零梯度很大", "优势为正梯度向上"],
+        answer: 1,
+        explain: "BRM §6.7：全同分 → 减均值全为 0 → 标准化后仍 0 → 本题不产生更新信号。"
+      },
+      {
+        question: "advantage 标准化（除以组标准差）的主要目的？",
+        options: ["防止数值下溢", "让不同题的信号量纲可比", "提高奖励的平均水平", "压缩答案的生成长度"],
+        answer: 1,
+        explain: "BRM §6.7：不管组内对错比例如何，优势幅度归一到可比的尺度，梯度更新稳定。"
+      },
+      {
+        question: "GRPO 学习信号主要来自什么难度的题？",
+        options: ["模型从不会做的难题", "模型必对的简单题", "模型有时对有时错的题", "奖励最高的那些题"],
+        answer: 2,
+        explain: "全对/全错 → 零优势零梯度；只有「有时对」的题组内有分化 → 有正有负的优势 → 有学习信号。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

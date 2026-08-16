@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 2 课 · 分词：文字变成数字</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 2 课 · Build a LLM From Scratch · 对应书 §2.1–2.4</p>
+  <h1>分词：文字如何变成数字</h1>
+  <p class="subtitle">读完这一课，你能手工把一句话拆成 token、编成 ID——并理解每个 LLM 入口的那个"翻译官"是怎么工作的。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：凭记忆回答上一课的三个要点",
+      "questions": [
+        {
+          "q": "LLM 预训练的任务是什么？",
+          "options": ["预测下一个词", "翻译整段文本", "给文本打标签", "改写整篇文章"],
+          "answer": 0,
+          "explain": "下一个词预测——所有能力都从这一个自监督任务生长出来。"
+        },
+        {
+          "q": "GPT 继承了 Transformer 的哪部分？",
+          "options": ["仅解码器一侧", "仅编码器一侧", "两者都完整保留", "两者都彻底丢弃"],
+          "answer": 0,
+          "explain": "decoder-only。BERT 才是 encoder-only，原始 Transformer 两者兼备。"
+        },
+        {
+          "q": "预训练为什么不需要人工标注？",
+          "options": ["下一个词自带标签", "由人工写好答案", "由裁判模型打分", "标签不需要存在"],
+          "answer": 0,
+          "explain": "自监督学习：数据自身的结构（原文的下一个词）就是标签。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>为什么必须"嵌入"</h2>
+  <p>神经网络是一台<b>只懂数字</b>的机器：加法、乘法、矩阵运算。而文字是<span class="term">分类数据<span class="en">（categorical data）</span></span>——"猫"和"狗"之间没有可计算的数学关系。所以第一步，也是一切的地基：把每个词变成一个连续向量（一串实数）。这个映射就叫<span class="term">嵌入<span class="en">（embedding）</span></span>。</p>
+  <p>向量为什么神奇？因为向量之间可以计算"距离"和"方向"。经典的 Word2Vec 训练出的空间里，相似的词会自然聚拢——各种鸟类挤在一起，国家和城市挤在另一处。</p>
+  <div class="sidenote">本书不走 Word2Vec 的老路：GPT 类模型会在输入层自带一个<b>可训练的</b>嵌入层，随整个模型一起预训练——嵌入因此为"预测下一个词"这个任务量身定制（书 §2.1, p.30）。</div>
+  <span class="cite">——《书》§2.1, pp.28–31</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>第一步：把文本切开（tokenize）</h2>
+  <p>嵌入的对象不是整句话，而是一个个<span class="term">词元<span class="en">（token）</span></span>。最直觉的切法：按标点和空白切开。书里用正则表达式在短篇小说《The Verdict》上做了一个简易分词器：</p>
+
+<pre><code class="language-python">import re
+text = "Hello, world. This, is a test."
+# 按空白、逗号、句号（保留分隔符）切开
+preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+preprocessed = [item.strip() for item in preprocessed if item.strip()]
+# → ['Hello', ',', 'world', '.', 'This', ',', 'is', 'a', 'test', '.']</code></pre>
+
+  <p>对整篇 20,479 字符的《The Verdict》切下来，得到 4,690 个 token（书 §2.2, p.34）。注意两点：①标点本身也是 token；②<b>不转小写</b>——大小写携带信息（专有名词、句首），丢了可惜。</p>
+  <span class="cite">——《书》§2.2, pp.31–35</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>第二步：词表（vocab）与 token ID</h2>
+  <p>切出 token 后，收集全训练文本中<b>所有不重复</b>的 token，按字母排序，从 0 开始编号——就得到<span class="term">词汇表<span class="en">（vocabulary）</span></span>。《The Verdict》的词表有 1,130 个词。有了它，任何一段文本都可以编码（encode）成整数序列，也能解码（decode）回来：</p>
+
+<pre><code class="language-python">vocab = {token: integer for integer, token in enumerate(all_words)}
+
+class SimpleTokenizerV1:
+    def __init__(self, vocab):
+        self.str_to_int = vocab
+        self.int_to_str = {i: s for s, i in vocab.items()}
+
+    def encode(self, text):        # 文本 → token ID 列表
+        preprocessed = re.split(r'([,.:;?_!"()\']|--|\s)', text)
+        preprocessed = [t.strip() for t in preprocessed if t.strip()]
+        return [self.str_to_int[s] for s in preprocessed]
+
+    def decode(self, ids):         # token ID 列表 → 文本
+        text = " ".join([self.int_to_str[i] for i in ids])
+        return re.sub(r'\s+([,.?!"()\'])', r'\1', text)  # 去掉标点前的空格</code></pre>
+
+  <p>编码 <code>"It's the last he painted, you know,"...</code> 得到 <code>[1, 56, 2, 850, 988, ...]</code>——从这一刻起，模型的世界里只有整数。</p>
+  <span class="cite">——《书》§2.3, pp.35–39（列表 2.3）</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>两个问题，两个特殊 token</h2>
+  <p>拿一句训练集里没有的话去 encode——<code>"Hello, do you like tea?"</code>——程序当场崩溃：<code>KeyError: 'Hello'</code>。词表里没有"Hello"。这是真实世界的常态：总会遇到没见过的词。另外，把多篇独立文档拼成一整个训练语料时，模型需要知道"这里换了文档"。</p>
+  <p>解决方案是往词表里加两个<span class="term">特殊上下文 token<span class="en">（special context tokens）</span></span>（词表 1,130 → 1,132）：</p>
+  <table>
+    <tr><th>特殊 token</th><th>作用</th></tr>
+    <tr><td><code>&lt;|unk|&gt;</code></td><td>所有词表外的未知词都映射到它</td></tr>
+    <tr><td><code>&lt;|endoftext|&gt;</code></td><td>拼接语料时插在两篇独立文档之间，标记"上一篇到此结束"；也充当填充（padding）</td></tr>
+  </table>
+  <p>于是 <code>"Hello, do you like tea?"</code> 编码后解码回来变成 <code>&lt;|unk|&gt;, do you like tea?</code>——"Hello" 被未知 token 顶替了。</p>
+  <span class="cite">——《书》§2.4, pp.40–43</span>
+
+  <div class="sidenote">学界还有 [BOS]（序列开始）、[EOS]（序列结束）、[PAD]（批量训练时补齐长度）等常见特殊 token（书 §2.4, p.43）。GPT 分词器做减法：只保留 <code>&lt;|endoftext|&gt;</code> 一个，身兼 EOS 和 PAD 两职——而且连 <code>&lt;|unk|&gt;</code> 都不要。为什么敢不要？这就是下一课的主角 BPE。</div>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题，先凭记忆作答",
+      "questions": [
+        {
+          "q": "神经网络无法直接处理文本的根本原因是？",
+          "options": ["文本属于分类数据", "文本长度不固定", "文本编码不统一", "文本存储成本高"],
+          "answer": 0,
+          "explain": "文本是分类数据，与神经网络赖以运作的连续数学运算不兼容，所以必须先嵌入为向量。"
+        },
+        {
+          "q": "书中简易分词器为什么保留大小写、不转小写？",
+          "options": ["大小写携带信息", "减少计算开销", "正则表达式限制", "统一编码规范"],
+          "answer": 0,
+          "explain": "大小写能区分专有名词与普通名词、理解句子结构，还能生成正确大小写的文本。"
+        },
+        {
+          "q": "词汇表（vocabulary）是怎么构建的？",
+          "options": ["收集全部唯一词排序编号", "取最高频的词排序编号", "按首字母分组编成区块", "按出现顺序赋号去重复"],
+          "answer": 0,
+          "explain": "对整个训练集分词 → 取唯一 token → 排序（保证确定性）→ 从 0 编号。"
+        },
+        {
+          "q": "<|endoftext|> 在 GPT 训练语料中的作用是？",
+          "options": ["分隔互不相关的文档", "标记每个句子的结尾", "表示未知的生僻词", "补齐批内样本的长度"],
+          "answer": 0,
+          "explain": "拼接多篇独立文档时插入，告诉模型前后文本并不相关（它同时也兼作 PAD 用途）。"
+        },
+        {
+          "q": "<|unk|> 要解决的问题是？",
+          "options": ["词表外的未知词", "文档之间的边界", "批内长度的差异", "序列开头的标记"],
+          "answer": 0,
+          "explain": "所有没进词表的词统一映射到 <|unk|>，避免 KeyError。"
+        },
+        {
+          "q": "词元（token）和词（word）的关系是？",
+          "options": ["token 可以更小", "两者完全等同", "token 一定更大", "两者毫不相干"],
+          "answer": 0,
+          "explain": "token 可以是完整单词，也可以是子词、字符或标点——粒度比分词器更灵活。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你能亲手实现 <code>encode</code> / <code>decode</code>，并说清"为什么需要 <code>&lt;|unk|&gt;</code> 和 <code>&lt;|endoftext|&gt;</code>"。数据管道第一环（分词 → ID）已经打通。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 3 课「BPE 与滑动窗口」</strong><br>
+    GPT 真正使用的分词器——字节对编码（BPE）如何做到<b>永不遇到未知词</b>？输入-目标对如何用滑动窗口批量制造？token ID 又如何变成带位置信息的向量？对应书 §2.5–2.8，全章收官。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如："为什么要保留标点？" "词表大小会影响什么？" —— 卡住就回对话里问我。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 2 课 · 主教材 <a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a LLM (From Scratch)</a> §2.1–2.4 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch02" target="_blank">ch02</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

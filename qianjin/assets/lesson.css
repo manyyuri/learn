@@ -1,0 +1,247 @@
+/* ============================================
+   千金妆研习 · 共享样式
+   纸感、衬线、干枯玫瑰点缀。打印友好。
+   ============================================ */
+
+:root {
+  --paper: #fbf9f5;
+  --ink: #24211d;
+  --ink-soft: #5d564e;
+  --ink-faint: #8a8278;
+  --accent: #a45a6b;        /* 干枯玫瑰 */
+  --accent-soft: #f3e4e7;
+  --line: #e5ded4;
+  --gold: #b99659;
+  --ok: #3d7a52;
+  --bad: #b0403f;
+  --maxw: 44rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0 auto;
+  max-width: var(--maxw);
+  padding: 3rem 1.25rem 5rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", serif;
+  font-size: 1.05rem;
+  line-height: 1.85;
+}
+
+/* ---------- 页眉 ---------- */
+header.top { margin-bottom: 2.5rem; }
+
+.course {
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+  margin: 0 0 0.75rem;
+}
+.course a { color: var(--ink-faint); text-decoration: none; border-bottom: 1px dotted var(--ink-faint); }
+
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.4;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+
+.meta { color: var(--ink-faint); font-size: 0.85rem; margin: 0; }
+
+h2 {
+  font-size: 1.25rem;
+  margin: 3rem 0 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+h2 .no { color: var(--accent); margin-right: 0.4em; font-weight: 400; }
+
+p { margin: 0.8rem 0; }
+
+a { color: var(--accent); }
+
+strong { font-weight: 700; }
+
+/* ---------- 目标框 ---------- */
+.goal {
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 1.1rem 1.4rem;
+  margin: 1.5rem 0;
+}
+.goal .tag, .hw .tag, .src .tag, .ask .tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.15em;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 99px;
+  padding: 0.1em 0.8em;
+  margin-bottom: 0.5rem;
+}
+.goal p, .hw p, .src p, .ask p { margin: 0.4rem 0; }
+.goal ul { margin: 0.4rem 0 0.2rem; padding-left: 1.3em; }
+.goal li { margin: 0.15rem 0; }
+
+/* ---------- 脸部标注图 ---------- */
+.face-map { margin: 2rem 0 1rem; }
+.face-map .stage {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.face-map img { display: block; width: 100%; height: auto; }
+.face-map .dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 1.7rem; height: 1.7rem;
+  border-radius: 50%;
+  background: rgba(251, 249, 245, 0.92);
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, "PingFang SC", sans-serif;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.25);
+}
+figcaption {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+/* ---------- 拆解清单 ---------- */
+.legend { list-style: none; padding: 0; margin: 1.5rem 0; counter-reset: step; }
+.legend li {
+  counter-increment: step;
+  padding: 0.9rem 0 0.9rem 2.6rem;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+.legend li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0; top: 1.05rem;
+  width: 1.7rem; height: 1.7rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-size: 0.85rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, "PingFang SC", sans-serif;
+}
+.legend .name { font-weight: 700; }
+.legend .name .en { color: var(--ink-faint); font-weight: 400; font-size: 0.85rem; margin-left: 0.4em; }
+.legend .how { color: var(--ink-soft); font-size: 0.95rem; margin-top: 0.15rem; }
+
+/* ---------- 原则卡片 ---------- */
+.principles { display: grid; gap: 0.9rem; margin: 1.5rem 0; }
+.principle {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.9rem 1.2rem;
+  background: #fff;
+}
+.principle h3 { margin: 0 0 0.3rem; font-size: 1.05rem; }
+.principle p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; }
+
+/* ---------- 测验 ---------- */
+.quiz { margin: 1.5rem 0; }
+.quiz-q {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.3rem;
+  margin-bottom: 1rem;
+}
+.quiz-stem { font-weight: 700; margin: 0 0 0.7rem; }
+.quiz-opts { display: grid; gap: 0.45rem; }
+.quiz-opt {
+  font-family: inherit;
+  font-size: 0.95rem;
+  text-align: left;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.quiz-opt:hover:not(:disabled) { border-color: var(--accent); }
+.quiz-opt:disabled { cursor: default; opacity: 0.85; }
+.quiz-opt.is-correct { border-color: var(--ok); background: #eef6f0; color: var(--ok); font-weight: 700; }
+.quiz-opt.is-wrong { border-color: var(--bad); background: #faecec; color: var(--bad); }
+.quiz-note { font-size: 0.88rem; color: var(--ink-soft); margin: 0.6rem 0 0; }
+.quiz-score {
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 700;
+  margin-top: 0.5rem;
+}
+
+/* ---------- 任务 / 来源 / 提问框 ---------- */
+.hw, .src, .ask {
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  padding: 1.1rem 1.4rem;
+  margin: 1.5rem 0;
+}
+.hw .tag { background: var(--gold); }
+.hw ol, .src ul { margin: 0.4rem 0 0.2rem; padding-left: 1.4em; }
+.hw li, .src li { margin: 0.25rem 0; }
+.ask { background: #fff; }
+.src { font-size: 0.95rem; }
+
+/* ---------- 术语表 / 表格 ---------- */
+dl.gloss dt {
+  font-weight: 700;
+  margin-top: 1.1rem;
+}
+dl.gloss dt .py { color: var(--ink-faint); font-weight: 400; font-size: 0.85rem; margin-left: 0.5em; }
+dl.gloss dd { margin: 0.15rem 0 0; color: var(--ink-soft); font-size: 0.97rem; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2rem 0;
+  font-size: 0.92rem;
+}
+th, td { border: 1px solid var(--line); padding: 0.45rem 0.7rem; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); font-weight: 700; }
+
+/* ---------- 页脚导航 ---------- */
+footer.nav {
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+  color: var(--ink-faint);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* ---------- 打印 ---------- */
+@media print {
+  body { background: #fff; padding: 1rem; font-size: 0.95rem; }
+  .quiz-opt { border-color: #999; }
+  .face-map .stage { border: none; }
+  h2 { page-break-after: avoid; }
+  .quiz-q, .principle, .legend li { page-break-inside: avoid; }
+}
+
+@media (max-width: 480px) {
+  body { padding-top: 2rem; }
+  h1 { font-size: 1.4rem; }
+}

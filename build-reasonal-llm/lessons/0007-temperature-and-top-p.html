@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 7 课 · 温度与 Top-p — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 7 课 · 温度与 Top-p：驯服下一个 token 的随机性</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §4.4–4.5</span>
+    <span class="chip">⏱ 35–45 分钟</span>
+    <span class="chip">🎯 收获：彻底搞懂 logits→温度→softmax→top-p→采样 全链路</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>到目前为止我们一直用 argmax（贪心）——同一道题永远得到同一个答案。但下一课的投票需要模型能给出<strong>不同</strong>的解法路径。控制"多不一样"的两个旋钮就是 temperature 和 top-p。这两个参数你在任何 LLM API 里都见过（OpenAI、Anthropic、Qwen……）；这课之后你不再靠玄学调它们。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>全景：下一个 token 是怎么选出来的</h2>
+
+  <p>以 "The capital of Germany is" 为例，完整链路五步<span class="cite">BRM §4.4.1–4.4.3</span>：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">① logits<small>151,936 个原始分数</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">② ÷ 温度<small>调峰谷差距</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">③ softmax<small>变成概率分布</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">④ top-p 过滤<small>砍掉长尾</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">⑤ 采样<small>torch.multinomial</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 采样解码管线。argmax 贪心 = 跳过②④⑤直接取最大；采样解码 = 全程走完。<span class="cite">BRM fig 4.8/4.16</span></div>
+  </div>
+
+  <div class="callout note">
+    <span class="co-label">softmax 回顾</span>softmax 把任意实数分数变成合法概率（非负、总和 1）：每个取 <code>exp(zᵢ)</code> 再除以总和。谁的 logit 高谁概率大，但<b>都保留可能性</b>——这是"采样"的物理基础。<span class="cite">BRM §4.4.3 侧栏</span>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>温度：除一下，改变峰谷比</h2>
+
+  <p>实现只有一行——logits 除以温度<span class="cite">BRM §4.4.2, listing 4.4</span>：</p>
+
+<pre><code>def scale_logits_by_temperature(logits, temperature):
+    if temperature <= 0:
+        raise ValueError("Temperature must be positive")
+    return logits / temperature</code></pre>
+
+  <p>但效果是乘法级的。书里的实测（"Berlin" 的采样概率）<span class="cite">BRM §4.4.2–4.4.3</span>：</p>
+
+  <table>
+    <thead><tr><th>温度</th><th>分布形状</th><th>"Berlin" 概率</th><th>行为</th></tr></thead>
+    <tbody>
+      <tr><td>→ 0</td><td>尖成针</td><td>→ 100%</td><td>等价于贪心 argmax</td></tr>
+      <tr><td>0.35</td><td>很尖</td><td>~42%</td><td>稳定，偶有变化</td></tr>
+      <tr><td>1.0</td><td>原样</td><td>（基准）</td><td>模型原生置信度</td></tr>
+      <tr><td>5.0</td><td>摊平</td><td>0.03%</td><td>1000 次采样全是乱码 token</td></tr>
+    </tbody>
+  </table>
+
+  <p><b>直觉：温度缩放的是 logits 之间的"落差"。</b>T&lt;1 拉大落差 → 头部 token 更霸道；T&gt;1 压平落差 → 尾部 token 也有机会。T=5 时书里采出的下一个词是 "mistress"——语法上是个词，语义上完全跑偏<span class="cite">BRM §4.4.3</span>。</p>
+
+  <div class="margin-note">
+    <span class="mn-label">🌡 为什么叫温度</span>借自统计物理：温度越高，系统粒子越"躁动"。这里温度越高，token 选择越随机。<span class="cite">BRM §4.4.2 侧栏</span>
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>Top-p：砍掉长尾再采样</h2>
+
+  <p>温度的副作用：摊平后，那些概率极低的"垃圾 token"也获得了非零概率，偶尔会被抽中。<span class="term">top-p</span>（nucleus sampling）的解法：<b>只保留累积概率达到 p 的最小 token 集合，其余清零，重新归一化后采样</b><span class="cite">BRM §4.5</span>。</p>
+
+  <p>四步实现（10-token 玩具词表演示）<span class="cite">BRM §4.5.1, listing 4.10–4.15</span>：</p>
+
+<pre><code>def top_p_filter(probas, top_p):
+    if top_p is None or top_p >= 1.0:
+        return probas
+    sorted_probas, sorted_idx = torch.sort(probas, dim=1, descending=True)  # ① 降序排
+    cumprobas = torch.cumsum(sorted_probas, dim=1)                          # ② 累积和
+    prefix = cumprobas - sorted_probas          # ③ 前缀（不含自己）&lt; top_p 的保留
+    keep = prefix &lt; top_p                       #    —— 跨过阈值的那只也保留
+    keep[:, 0] = True                           #    保底：第一名永远保留
+    kept_sorted = torch.where(keep, sorted_probas, torch.zeros_like(sorted_probas))
+    filtered = torch.zeros_like(probas).scatter(1, sorted_idx, kept_sorted) # ④ 回原位
+    denom = torch.sum(filtered, dim=1, keepdim=True).clamp_min(1e-12)
+    return filtered / denom                     # ⑤ 重归一化</code></pre>
+
+  <p>书中效果（T=0.35, p=0.8）：过滤前 1000 次采样里 "Berlin" 435 次、下划线一堆、还有 Munich/Hamburg；过滤后只剩 "Berlin" 534 次 + 下划线——<b>Munich/Hamburg 这类低概率项被砍掉了</b><span class="cite">BRM §4.5.1</span>。</p>
+
+  <div class="callout note">
+    <span class="co-label">top-p vs top-k</span>top-k 保留<b>固定个数</b> k 个最高分 token；top-p 保留<b>可变个数</b>——置信分布尖时留几个，摊平时留几百个。top-p 对分布形状自适应，如今更主流。<span class="cite">BRM §4.5.2 侧栏</span>
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>装进生成函数</h2>
+
+  <p>在 KV cache 版生成循环里替换 argmax 分支<span class="cite">BRM §4.4.4/4.5.2, listing 4.16</span>：</p>
+
+<pre><code>@torch.inference_mode()
+def generate_text_top_p_stream_cache(model, token_ids, max_new_tokens,
+                                     eos_token_id=None, temperature=0., top_p=None):
+    model.eval()
+    cache = KVCache(n_layers=model.cfg["n_layers"])
+    model.reset_kv_cache()
+    out = model(token_ids, cache=cache)[:, -1]
+    for _ in range(max_new_tokens):
+        if temperature is None or temperature == 0.0:
+            next_token = torch.argmax(out, dim=-1, keepdim=True)   # 贪心
+        else:
+            logits = scale_logits_by_temperature(out, temperature) # ②
+            probas = torch.softmax(logits, dim=-1)                 # ③
+            probas = top_p_filter(probas, top_p)                   # ④
+            next_token = torch.multinomial(probas.cpu(), num_samples=1)  # ⑤
+        if eos_token_id is not None and torch.all(next_token == eos_token_id):
+            break
+        yield next_token
+        out = model(next_token, cache=cache)[:, -1]</code></pre>
+
+  <div class="callout warn">
+    <span class="co-label">实践要点</span>① <b>temperature=0.0 ≈ 贪心</b>（argmax 分支）；② 书中实测在 cuda/mps 上 <code>multinomial</code> 大样本不稳定甚至崩溃（PyTorch 2.9），故采样搬回 CPU 做；③ 常用起点：<b>T ∈ [0.5, 0.9]，p ∈ [0.7, 0.9]</b>；答案太雷同 → 调高，答案开始胡说 → 先降 T。<span class="cite">BRM §4.4.4/4.6 侧栏</span>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>温度 = logits ÷ T，调峰谷比（低稳高浪）；top-p = 砍掉累积概率 p 之外的长尾再归一化。贪心 vs 采样的全部区别，就在这两步。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/1904.09751">The Curious Case of Neural Text Degeneration</a>（Holtzman et al., 2019）——top-p/nucleus sampling 的原始论文。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0008-self-consistency.html">Self-consistency 投票</a>——多样本 + 多数票，把采样变成准确率。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想手推一遍 softmax 数值例子、或讨论你业务场景该定什么温度，直接问。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0006-cot-prompting.html">← 第 6 课</a>
+    <a class="nav-next" href="0008-self-consistency.html">第 8 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 7 课检索练习",
+    questions: [
+      {
+        question: "温度 0.5 与 5.0 相比，对下一 token 分布的影响是？",
+        options: ["两者完全相同", "前者更尖后者更平", "前者更平后者更尖", "前者删除长尾"],
+        answer: 1,
+        explain: "BRM §4.4.2：logits ÷ T。T<1 放大落差（更尖、更确定），T>1 压平落差（更随机）。"
+      },
+      {
+        question: "top_p=0.8 的准确含义是什么？",
+        options: ["保留概率最高的八成 token 数量", "保留累积概率达 0.8 的最小集合", "丢弃概率前 0.8 的 token", "每次以 0.8 概率采样"],
+        answer: 1,
+        explain: "BRM §4.5：按概率降序累积，留到刚跨过 p 的那只为止，其余清零后重归一化。保留的 token 个数是可变的。"
+      },
+      {
+        question: "温度设为 0.0 时，生成函数走哪个分支？",
+        options: ["softmax 后采样", "argmax 贪心分支", "top-p 过滤分支", "均匀随机采样"],
+        answer: 1,
+        explain: "BRM §4.5.2 listing 4.16：temperature 为 0 或 None 直接 argmax——等价贪心解码。"
+      },
+      {
+        question: "top-p 相对 top-k 的核心优势是？",
+        options: ["实现代码更简短", "计算速度更加快", "保留集合大小自适应分布", "完全消除随机性"],
+        answer: 2,
+        explain: "BRM §4.5.2 侧栏：分布尖时 top-p 只留少数，分布平时留一大片——比固定 k 更稳健。"
+      },
+      {
+        question: "书中实测采样为什么放到 CPU 上执行？",
+        options: ["CPU 精度更高的多", "CPU 上随机种子可控", "mps/cuda 的 multinomial 不稳定", "CPU 有专门采样指令"],
+        answer: 2,
+        explain: "BRM §4.4.3：PyTorch 2.9 里 cuda/mps 上 multinomial 大批量采样结果不稳甚至崩溃，所以 .cpu() 后再采。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

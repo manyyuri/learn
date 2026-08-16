@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 11 课 · RL 铺垫 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 11 课 · RL 词汇速成：在进 GRPO 之前</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §6.1–6.2</span>
+    <span class="chip">⏱ 30–40 分钟</span>
+    <span class="chip">🎯 收获：policy / rollout / reward / advantage / KL 一词不虚，RLHF→RLVR 一图讲清</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么有这课：</strong>书默认读者懂 RL 术语，你没有 RL 背景——所以这课先不碰代码，把 ch6 的概念地基打好。好消息：你已经学过的东西（温度采样、验证器、logprob）正好是 RLVR 的全部零件。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>RL 在 LLM 流水线里的位置</h2>
+
+  <p>预训练学"下一个词是什么"（你已经从上一本书掌握）；RL 是 <span class="term">post-training</span>：在预训练（或指令微调）之后，<b>优化整个输出</b>——答案对不对、人喜不喜欢——而不是逐 token<span class="cite">BRM §6.1</span>。一句话分工：<b>预训练储备知识，RL 塑造知识的用法</b>。</p>
+
+  <p>两种 RL 阶段<span class="cite">BRM §6.1</span>：<b>推理训练</b>（本课主角，可像 DeepSeek-R1-Zero 那样直接怼在 base 模型上）→ <b>偏好调优</b>（RLHF，通常在后）。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>RLHF：奖励模型的两步走</h2>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">模型多采样<small>每题多个回答</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">人工排序<small>A 好还是 B 好</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">训练奖励模型<small>给它打分能力</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">RL 更新 LLM<small>用分数当信号</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · RLHF 两步：<b>奖励模型</b>（本身是个 LLM，学会了模仿人类偏好打分）+ <b>RL 微调</b>。<span class="cite">BRM §6.1.1</span></div>
+  </div>
+
+  <p>例：问"买笔记本看什么"，回答 A 罗列全部参数，回答 B 给出具体建议（16GB 内存、SSD…）——标注员普遍偏好 B。成千上万对这样的偏好对，喂给奖励模型；此后 RL 训练时奖励模型自动打分（好答案 +2，差答案 −2），不再麻烦人类<span class="cite">BRM §6.1.1</span>。这就是 InstructGPT/ChatGPT 的关键配方（<a href="https://arxiv.org/abs/2203.02155">InstructGPT 论文</a>，2022）。</p>
+
+  <p><b>痛点：</b>奖励模型又贵又难训（往往和主模型一样大），且打分带噪声。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>RLVR：把奖励模型换成验证器</h2>
+
+  <p><span class="term">RLVR</span>（Reinforcement Learning with Verifiable Rewards）：<b>用一个确定性的验证器替代学的奖励模型</b>——正是你在第 4 课手写的那个数学验证器！答案对且格式合规 → 奖励 1；否则 0。两步流水线坍缩成一步：采样 → 验证打分 → 更新权重<span class="cite">BRM §6.1.2</span>。</p>
+
+  <table>
+    <thead><tr><th></th><th>RLHF</th><th>RLVR</th></tr></thead>
+    <tbody>
+      <tr><td>奖励来源</td><td>训练出的奖励模型（模仿人）</td><td>确定性验证器（数学/代码）</td></tr>
+      <tr><td>管线</td><td>两步（训 RM + RL）</td><td><b>一步</b></td></tr>
+      <tr><td>成本</td><td>高（RM ≈ 主模型规模）</td><td>低（无额外模型）</td></tr>
+      <tr><td>稳定性</td><td>RM 打分有噪声</td><td>确定、可复现</td></tr>
+      <tr><td>适用域</td><td>主观偏好（聊天、文风）</td><td><b>仅可验证域</b>（数学、代码）</td></tr>
+    </tbody>
+  </table>
+
+  <p>RLVR 因 DeepSeek-R1（2025）一战成名：不靠人类偏好数据，纯用可验证奖励训出强推理<span class="cite">BRM §6.1.2</span>。代码任务的验证 = 沙箱里编译运行（书不展开，因需安全隔离环境；算法与数学版完全相同）。</p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>RL 黑话 → 你已知的概念</h2>
+
+  <table>
+    <thead><tr><th>RL 术语</th><th>在这本书里 =</th><th>你已在哪里见过</th></tr></thead>
+    <tbody>
+      <tr><td><b>policy 策略</b></td><td>就是被训练的那个 LLM</td><td>—</td></tr>
+      <tr><td><b>rollout</b></td><td>对一道题生成的<b>一整个回答</b></td><td>≈ 第 8 课的一份采样</td></tr>
+      <tr><td><b>reward 奖励</b></td><td>验证器给 rollout 的分（1/0）</td><td>第 4 课验证器</td></tr>
+      <tr><td><b>logprob</b></td><td>当前模型对 rollout 的自信程度</td><td>第 9 课 logprob 打分</td></tr>
+      <tr><td><b>advantage 优势</b></td><td>奖励减去同组平均（标准化）</td><td>≈ 第 8 课"相对多数"直觉</td></tr>
+      <tr><td><b>KL 惩罚</b></td><td>别偏离原模型太远的缰绳</td><td>下一章细讲</td></tr>
+    </tbody>
+  </table>
+
+  <p>主厨比喻（书原创，超好用）<span class="cite">BRM §6.2.1</span>：你是厨师（policy）；顾客点千层面（prompt）；你按几种不同配方试做（rollouts）；<b>顾客只尝完整成品再评价</b>（reward，不看做菜过程）；对比哪些配方受欢迎（advantage，组内相对）；记录每道菜有多"像你的风格"（logprob）；据此调整烹饪风格（policy gradient 更新）——同时对照老菜谱、避免风格剧变吓跑老顾客（参考模型 + KL 惩罚）。</p>
+
+  <div class="callout key">
+    <span class="co-label">最易混淆的一对</span><b>RLVR 决定"学什么信号"（验证器给奖励），GRPO 决定"怎么用信号更新权重"。</b>GRPO 是策略优化算法——PPO 的简化亲戚：PPO 要额外训一个价值模型来估计基线，GRPO 直接用<b>组内相对比较</b>当基线，省掉一个模型<span class="cite">BRM §6.2</span>。这就是 "G"（group）的含义。
+  </div>
+
+  <div class="callout note">
+    <span class="co-label">剧透：这章的威力</span>base 模型 MATH-500 准确率 <b>15.2% → 47.4%</b>，只训 50 步——逼近官方 reasoning 模型的 48.2%<span class="cite">BRM table 6.1</span>。接下来两课就是这 50 步的完整解剖。
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>RLHF = 训练奖励模型模仿人偏好（两步、贵）；RLVR = 确定性验证器直接发奖励（一步、稳，限可验证域）。policy=LLM、rollout=一整条回答、advantage=组内相对好坏。GRPO 用组内比较省掉价值模型。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1 论文</a>——RLVR 路线的标志成果；<a href="https://arxiv.org/abs/2402.03300">DeepSeekMath</a>——GRPO 算法出处。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0012-grpo-rollouts-and-advantages.html">GRPO 实操 I：rollouts 与 advantages</a>——动手采样、打奖励、算优势。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：RL 术语卡壳尽管问——"policy 为什么不叫 model"、"advantage 为什么要标准化"这类问题都很值得问。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0010-self-refinement.html">← 第 10 课</a>
+    <a class="nav-next" href="0012-grpo-rollouts-and-advantages.html">第 12 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 11 课检索练习",
+    questions: [
+      {
+        question: "RLHF 的两个步骤，正确顺序是？",
+        options: ["先 RL 微调后收集偏好", "先训奖励模型后 RL 微调", "先预训练后验证打分", "先算优势后采 rollouts"],
+        answer: 1,
+        explain: "BRM §6.1.1：先用人类偏好对训练奖励模型，再用它给 LLM 输出打分、驱动 RL 更新。"
+      },
+      {
+        question: "RLVR 相对 RLHF 最大的简化是什么？",
+        options: ["不再需要预训练模型", "省去了单独的奖励模型", "无需采样多个回答", "训练数据量大幅减少"],
+        answer: 1,
+        explain: "BRM §6.1.2：确定性验证器（如数学验证器）直接发奖励，两步坍缩成一步。base 模型仍要，rollout 仍要。"
+      },
+      {
+        question: "「policy」这个词在本书语境中指的是？",
+        options: ["验证器打分的规则", "被训练的那个 LLM 本身", "温度与 top-p 的设置", "人类标注的偏好数据"],
+        answer: 1,
+        explain: "BRM §6.2：RL 行话——policy 就是我们要更新的 LLM。"
+      },
+      {
+        question: "GRPO 相对 PPO 的核心省略是？",
+        options: ["不再采样多个回答", "去掉了 KL 正则项", "不需要单独的价值模型", "不再需要奖励信号"],
+        answer: 2,
+        explain: "BRM §6.2 侧栏：GRPO 用组内 rollouts 的相对比较代替价值模型估计基线，资源友好得多。（KL 项 ch7 还会加回来。）"
+      },
+      {
+        question: "RLVR 的主要适用限制是？",
+        options: ["只对超大模型有效", "必须有人类标注员在线", "仅限可自动验证的任务域", "只能在 GPU 集群运行"],
+        answer: 2,
+        explain: "BRM §6.1.2：需要可靠的验证信号——数学（对答案）和代码（编译运行）；主观/开放任务没有客观验证器。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

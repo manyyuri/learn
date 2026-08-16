@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 15 课 · 蒸馏 I — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 15 课 · 蒸馏 I：数据生成与 SFT</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §8.1–8.7</span>
+    <span class="chip">⏱ 35–45 分钟</span>
+    <span class="chip">🎯 收获：用 $50 的教师数据 + 3 小时训练，复刻 DeepSeek-R1 的生产工艺</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>R1 有 6710 亿参数，你部署不起——但 DeepSeek 团队的做法是让它当老师，把推理能力<b>蒸</b>进小模型。R1 论文实测：蒸馏出的小模型<b>胜过</b>同尺寸纯 RL 训练的模型<span class="cite">BRM §8.1</span>。对你的工作这是最可行的路线：不用 RL 基础设施、不用奖励设计，只需要 API 预算和一个标准微调循环。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>Hard vs Soft 蒸馏</h2>
+
+  <table>
+    <thead><tr><th></th><th>Hard 蒸馏（本课）</th><th>Soft 蒸馏</th></tr></thead>
+    <tbody>
+      <tr><td>学生学什么</td><td>教师生成的<b>文本</b>（token 即目标）</td><td>教师的<b>完整概率分布</b>（KL 对齐）</td></tr>
+      <tr><td>本质</td><td>合成数据上的 SFT</td><td>分布匹配</td></tr>
+      <tr><td>需要教师</td><td>只要输出文本</td><td>要 logits（API 一般不给）</td></tr>
+      <tr><td>额外约束</td><td>几乎无</td><td>师生 tokenizer 最好一致</td></tr>
+    </tbody>
+  </table>
+  <p>实践中 hard 蒸馏占绝对主流——文本便宜好存，logits 又贵又难拿<span class="cite">BRM §8.1</span>。DeepSeek-R1 的小模型们全是 hard 蒸馏。⚠️ 注意：用专有模型（OpenAI/Anthropic）的输出做训练数据，先查服务条款。</p>
+
+  <div class="callout key">
+    <span class="co-label">和 RLVR 的账面对比</span>同一块 MATH 训练集：GRPO 训练 ~12 小时 / 70GB 显存；蒸馏 ~3 小时 / 15GB（教师数据已提前生成，$50 API 费）——<b>因为最贵的"生成"被一次性挪到了训练之外</b>。<span class="cite">BRM §8.1/8.8</span>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>造数据：让 R1 当老师</h2>
+
+  <p>12,000 道 MATH 训练题（与 MATH-500 不重叠，同第 12 课）逐题喂给 DeepSeek-R1，收集回答。每条记录四个字段<span class="cite">BRM §8.3</span>：</p>
+
+<pre><code>{"problem":        "Sam is hired for a 20-day period...",   # 题目
+ "gtruth_answer":  "6",                                    # 标准答案（用于验证教师）
+ "message_thinking": "Okay, let's see. Sam was hired...",    # 教师的推理过程 ← 精华
+ "message_content":  "Sam worked x days and did not work...", # 教师的最终解答}</code></pre>
+
+  <p>教师质检：R1 在这批题上 <b>90.6%</b> 正确（MATH-500 上 91.2%）——作为对照，学生 base 是 15.2%，官方 0.6B reasoning 是 50.8%<span class="cite">BRM §8.3</span>。训练目标拼装：</p>
+
+<pre><code>def format_distilled_answer(entry):
+    return (f"&lt;think&gt;{entry['message_thinking']}&lt;/think&gt;\n\n"
+            f"{entry['message_content']}")          # 推理装进 think 标签，答案在外</code></pre>
+
+  <p><code>&lt;think&gt;</code> 标签不参与训练本身，但让推理与答案<b>结构分离</b>——部署时 UI 可以只展示答案、折叠推理（ChatGPT 就是这么做的）<span class="cite">BRM §8.3</span>。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>预处理：一个数字暴露的行业真相</h2>
+
+  <p> tokenize（reasoning 版，原生支持 think 标签 + chat 模板）后统计长度<span class="cite">BRM §8.4.3</span>：</p>
+  <ul>
+    <li>平均 <b>2,946 tokens</b>——这就是推理模型为什么贵：一道题近 3k token 的思考</li>
+    <li>最长 <b>42,005 tokens</b>（一道题想了一天）</li>
+    <li>过滤到 ≤2048：12000 → <b>6695 条</b>（砍掉 44%！）→ 再切 6670 训练 / 25 验证</li>
+  </ul>
+  <p><b>长度过滤是蒸馏在消费级硬件上可行的关键杠杆</b>——也意味着我们的学生天生是"简短型"推理者。</p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>损失函数：cross-entropy 的真面目</h2>
+
+  <p>蒸馏损失 = <b>只在答案 token 上算的 cross-entropy</b>。而你早就认识它<span class="cite">BRM §8.6</span>：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">教师 token 的 logprob<small>第 9 课</small></div>
+      <div class="arrow">取负→</div>
+      <div class="stage">按答案 token 平均→</div>
+      <div class="arrow">=</div>
+      <div class="stage hl">cross-entropy<small>1.68（书例）</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · CE = 正确 token 的负平均 log-prob。书例：seq logprob −16.63 ÷ 10 个答案 token ≈ 1.68，与 <code>F.cross_entropy</code> 输出完全一致。</div>
+  </div>
+
+<pre><code>def compute_example_loss(model, example, device):
+    token_ids = example["token_ids"]
+    input_ids  = torch.tensor(token_ids[:-1]).unsqueeze(0)  # 错位一格：预测下一个
+    target_ids = torch.tensor(token_ids[1:])
+    logits = model(input_ids).squeeze(0)
+    answer_start = max(example["prompt_len"] - 1, 0)         # prompt 段不罚
+    loss = F.cross_entropy(logits[answer_start:], target_ids[answer_start:])
+    return loss</code></pre>
+
+  <p><b>prompt 不算损失</b>（它是给定的上下文，不是学生要学的），只对教师答案算——这和第 9 课 avg_logprob 只取答案段如出一辙。</p>
+
+  <!-- ==================== 5 ==================== -->
+  <h2><span class="secno">05</span>训练循环：老朋友全家福</h2>
+
+  <p>比 RLVR 循环更简单——没有采样、没有奖励、没有优势，就是<b>标准监督训练循环</b><span class="cite">BRM §8.7</span>：按 epoch 轮转（每轮洗牌）→ 逐例算 CE loss → backward → 裁剪 → optimizer.step() → 定期在验证集上评估 + 存 checkpoint。超参：lr=1e-5、grad_clip=1.0、3 epochs。</p>
+
+  <p>看板只有两个数：<b>train_loss</b>（噪声大）和 <b>val_loss</b>（25 条留出集，干净）——<b>val loss 是主信号</b>：骤降后趋平 = 健康的学习曲线<span class="cite">BRM §8.8</span>。</p>
+
+  <div class="callout warn">
+    <span class="co-label">M1 Pro 实跑建议</span>书配置（2048 上限）需 ~15GB 显存，16GB 的 Mac 勉强够。安全做法：max_len 降到 512 或 1024（数据多留一些），或 batch=1 逐例训练（书即是）。教师数据 107MB 可从 HuggingFace <code>rasbt/math_distill</code> 直接下载，不用自己生成。
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">06</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>Hard 蒸馏 = 拿教师（R1）的「推理过程 + 答案」当 SFT 数据：think 标签分离思考、长度过滤控成本、answer-only cross-entropy（= 负平均 logprob）做损失、标准循环训练。数据一次性、训练便宜、可迭代。</strong>
+  </div>
+
+  <h2><span class="secno">07</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：DeepSeek-R1 论文 §2.3.5 蒸馏一节（你会完全看懂每一步）。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0016-distillation-eval-and-beyond.html">蒸馏 II：成绩单、方法选型与全书收官</a>——最后一个数字揭晓 + 你的工作应用地图。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想规划一次真实的小规模蒸馏（选教师、定预算、设过滤长度）？现在正是好时机。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0014-grpo-improvements.html">← 第 14 课</a>
+    <a class="nav-next" href="0016-distillation-eval-and-beyond.html">第 16 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 15 课检索练习",
+    questions: [
+      {
+        question: "Hard 蒸馏相对 Soft 蒸馏的 decisive 优势是？",
+        options: ["学生准确率更加高", "只需教师文本无需 logits", "训练速度成倍提升", "不依赖任何教师模型"],
+        answer: 1,
+        explain: "BRM §8.1：API 一般不暴露完整词表分布（logits），文本却随手可得且便宜好存——所以 R1 小模型全是 hard 蒸馏。"
+      },
+      {
+        question: "蒸馏数据里 message_thinking 字段的价值是？",
+        options: ["用于验证教师答案对错", "提供推理过程作为学习目标", "仅用于统计序列长度", "用来渲染 chat 模板"],
+        answer: 1,
+        explain: "BRM §8.2–8.3：蒸馏的精华是「推理轨迹」而不只是答案——学生学的正是教师怎么想。"
+      },
+      {
+        question: "为什么数据要过滤到 2048 token 以内？",
+        options: ["提高教师的答案质量", "让训练在有限显存可行", "符合 MATH-500 的格式要求", "减少验证集的大小"],
+        answer: 1,
+        explain: "BRM §8.4.3：平均 2946、最长 42k token；长度过滤是蒸馏在小硬件上可行的关键杠杆（代价是砍掉 44% 数据）。"
+      },
+      {
+        question: "answer-only cross-entropy 与第 9 课哪个计算本质相同？",
+        options: ["多数投票的计数", "答案段平均负 logprob", "温度缩放后的采样", "top-p 过滤后的概率"],
+        answer: 1,
+        explain: "BRM §8.6：CE = 正确 token logprob 取负再平均（书例 1.68 两种算法完全一致）；同样排除 prompt 段。"
+      },
+      {
+        question: "训练过程中应主要盯哪个指标？",
+        options: ["训练损失的单步波动", "验证集损失", "教师数据的准确率", "答案的平均长度"],
+        answer: 1,
+        explain: "BRM §8.8：train loss 噪声大；val loss 在留出集上算、干净，是判断学生是否真在进步的主信号。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

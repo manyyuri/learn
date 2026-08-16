@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 3 课 · BPE、滑动窗口与嵌入</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 3 课 · Build a LLM From Scratch · 对应书 §2.5–2.8</p>
+  <h1>BPE、滑动窗口与词嵌入</h1>
+  <p class="subtitle">读完这一课，文字→数字的完整管道全部打通：一块原始文本进去，一组带位置信息的向量出来——这就是喂给 GPT 的"饭"。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的分词基础",
+      "questions": [
+        {
+          "q": "遇到词表外的词，简易分词器 v2 会怎么做？",
+          "options": ["映射到未知", "直接报错退出", "拆成单字符", "就近模糊替换"],
+          "answer": 0,
+          "explain": "映射到 <|unk|>。但下一课你会看到 GPT 根本不需要它——BPE 能拆词。"
+        },
+        {
+          "q": "<|endoftext|> 的两个用途是？",
+          "options": ["分隔与填充", "转义与换行", "缩进与空格", "断句与引用"],
+          "answer": 0,
+          "explain": "既分隔独立文档（≈EOS），又可作 PAD 填充。"
+        },
+        {
+          "q": "GPT-2 的词表大小约是？",
+          "options": ["50257 个词元", "1130 个词元", "12288 个词元", "5000 亿个词元"],
+          "answer": 0,
+          "explain": "50,257 —— 这个数字本课和第 8 课的模型配置里都会反复出现。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>BPE：永不言"未知"的分词器</h2>
+  <p>简易分词器有个致命伤：词表是封闭的，遇到新词只能投降（<code>&lt;|unk|&gt;</code>）。而 GPT-2、GPT-3 和 ChatGPT 初代使用的<span class="term">字节对编码<span class="en">（BPE, Byte Pair Encoding）</span></span>思路完全不同：<b>不认识的大词，拆成认识的小块</b>。</p>
+  <p>BPE 构建词表的逻辑（书 §2.5, p.46）：从全部单字符开始 → 统计哪两个相邻单元最常一起出现 → 合并成新子词（如 <code>d</code>+<code>e</code>→<code>de</code>）→ 重复，直到词表达到目标大小。于是常见词（<code>the</code>）是完整 token，罕见词自动降级为子词序列，最坏也能拆回字符——<b>任何文本都能编码，永不 KeyError</b>。代价：GPT 词表 50,257 个 token，<code>&lt;|endoftext|&gt;</code> 占据最大编号 50256。</p>
+
+<pre><code class="language-python">import tiktoken                       # OpenAI 官方 BPE 库
+tokenizer = tiktoken.get_encoding("gpt2")
+
+text = "Hello, do you like tea? <|endoftext|> In the sunlit terraces of someunknownPlace."
+ids = tokenizer.encode(text, allowed_special={"&lt;|endoftext|&gt;"})
+# → [15496, 11, 466, 345, 588, 8887, 30, 220, 50256, 554, 262, ...]
+print(tokenizer.decode(ids))          # 原文完美复原，包括 someunknownPlace</code></pre>
+
+  <p>注意"someunknownPlace"这种生造词被顺利拆成多个子词（<code>some</code> / <code>unknown</code> / <code>Place</code> 的碎片），这正是 BPE 的杀手锏。</p>
+  <span class="cite">——《书》§2.5, pp.44–46</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>滑动窗口：批量制造"输入-目标"对</h2>
+  <p>回忆第 1 课：预训练任务 = 预测下一个词。那么训练数据就是无数的（输入，目标）对。生成方法朴素得优雅：让目标 = 输入<b>右移一位</b>。</p>
+
+<pre><code class="language-python">enc_sample = [290, 4920, 2241, 287, 257]   # BPE 编码后的片段
+x = enc_sample[:4]      # [290, 4920, 2241, 287]   输入
+y = enc_sample[1:5]     # [4920, 2241, 287, 257]   目标 = 右移一位</code></pre>
+
+  <p>一个长度 4 的窗口里其实藏着 4 道题：<code>[290]→4920</code>、<code>[290,4920]→2241</code>、<code>[…,2241]→287</code>、<code>[…,287]→257</code>。<span class="term">上下文长度<span class="en">（context length）</span></span>决定窗口大小（书的教育示例用 4，真实训练至少 256）。</p>
+  <p>窗口沿文本滑动、每次移动的格数叫<span class="term">步长<span class="en">（stride）</span></span>。stride = max_length 时窗口互不重叠（避免过拟合、充分利用数据）；stride &lt; max_length 时窗口重叠（同样文本产出更多训练样本）。实战用 PyTorch 的 <code>Dataset + DataLoader</code> 封装：</p>
+
+<pre><code class="language-python">class GPTDatasetV1(Dataset):
+    def __init__(self, txt, tokenizer, max_length, stride):
+        token_ids = tokenizer.encode(txt)
+        self.input_ids, self.target_ids = [], []
+        for i in range(0, len(token_ids) - max_length, stride):
+            self.input_ids.append(tokenizer[i : i + max_length])       # 窗口
+            self.target_ids.append(tokenizer[i + 1 : i + max_length + 1])  # 右移一位
+
+# DataLoader 批量吐出：inputs 形如 [batch, max_length]，targets 同形状
+dataloader = create_dataloader_v1(raw_text, batch_size=8, max_length=4,
+                                  stride=4, shuffle=True, drop_last=True)</code></pre>
+
+  <span class="cite">——《书》§2.6, pp.46–54（列表 2.5、2.6）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>词嵌入：ID 查表变向量</h2>
+  <p>token ID 还是整数，神经网络要的是向量。转换器就是 PyTorch 的 <code>nn.Embedding</code>——本质上是一张<b>可训练的查找表</b>：词表大小 × 嵌入维度 的矩阵，输入 ID 直接取对应行。</p>
+
+<pre><code class="language-python">vocab_size, output_dim = 6, 3      # 教学示例：6 个词，3 维向量
+embedding_layer = torch.nn.Embedding(vocab_size, output_dim)
+print(embedding_layer(torch.tensor([3])))   # 返回权重矩阵的第 3 行（从 0 计）</code></pre>
+
+  <p>初始权重是随机数，训练中与整个模型一起被反向传播优化——这就是"LLM 自己长出嵌入"的含义。GPT-2 用 50,257 × 768，GPT-3 用 50,257 × 12,288。</p>
+  <span class="cite">——《书》§2.7, pp.54–58</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>位置编码：告诉模型"谁在前谁在后"</h2>
+  <p>还差最后一件事。自注意力机制（下一章主角）有个先天缺陷：<b>它天生不知道词的位置</b>——同一个 token ID 在第 1 位和第 4 位，查表得到的向量一模一样。"狗咬人"和"人咬狗"在它眼里没有区别，这可不行。</p>
+  <p>GPT 的解法：再加一张可训练的位置查找表（行数 = 上下文长度），第 i 行就是"位置 i"的向量，<b>逐元素加到</b>对应词嵌入上：</p>
+
+<pre><code class="language-python">token_embeddings = token_embedding_layer(inputs)          # [8, 4, 256]
+pos_embeddings = pos_embedding_layer(torch.arange(4))     # [4, 256] 广播到每个样本
+input_embeddings = token_embeddings + pos_embeddings      # [8, 4, 256] ← 喂给 LLM！</code></pre>
+
+  <div class="sidenote">位置方案有两派：<b>绝对位置嵌入</b>（关心"在第几个位置"，GPT 用这派，且是可训练的）vs <b>相对位置嵌入</b>（关心"相距多远"，泛化到未见长度更好）。原始 Transformer 用的固定正弦编码是第三种经典方案（书 §2.8, pp.59–60）。</div>
+  <span class="cite">——《书》§2.8, pp.58–63</span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 完整数据管道",
+      "intro": "把 GPT 输入管道的步骤按真实顺序点出来",
+      "items": [
+        "原始文本（多文档以 <|endoftext|> 拼接）",
+        "BPE 分词器 encode → token ID 序列",
+        "滑动窗口 + DataLoader → 批量 (inputs, targets)，目标右移一位",
+        "nn.Embedding 查表 → token 向量 [batch, ctx, 768]",
+        "加上同维度的位置嵌入 → input_embeddings",
+        "送入 Transformer 主干（第 3–4 章）"
+      ],
+      "success": "正确！第 2 章就此通关。",
+      "explain": "管道：拼接语料 → BPE 编码 → 滑动窗口切出输入-目标对 → 词嵌入查表 → 加绝对位置嵌入 → 进 Transformer。第 5 章预训练时，我们喂的就是这条管道的产物。"
+    }
+    </script>
+  </div>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题 · 第 2 章收官检验",
+      "questions": [
+        {
+          "q": "BPE 遇到词表外的新词会？",
+          "options": ["拆成子词序列", "映射到未知符", "跳过该词不编码", "四舍五入近似"],
+          "answer": 0,
+          "explain": "BPE 从字符级起家，任何词最坏也能拆回字符——所以 GPT 不需要 <|unk|>。"
+        },
+        {
+          "q": "BPE 构建词表时，合并的依据是？",
+          "options": ["相邻出现频率", "词语语义相似", "字符编码顺序", "词元长度大小"],
+          "answer": 0,
+          "explain": "迭代合并语料中最频繁共现的相邻单元：字符→子词→常见词。"
+        },
+        {
+          "q": "滑动窗口法中，目标（target）是怎么来的？",
+          "options": ["输入右移一位", "输入倒序排列", "输入随机打乱", "输入复制一份"],
+          "answer": 0,
+          "explain": "y = x 右移一位：位置 i 的任务是预测位置 i+1 的词。"
+        },
+        {
+          "q": "为什么用 stride = max_length 而不是 1？",
+          "options": ["避免窗口重叠导致过拟合", "让窗口尽量互相重叠", "让每个词出现两次", "让批次数翻倍增长"],
+          "answer": 0,
+          "explain": "stride=1 时窗口大量重叠，同样的文本被反复采样，容易过拟合；stride=max_length 则窗口互不重叠。"
+        },
+        {
+          "q": "nn.Embedding 层的本质是什么操作？",
+          "options": ["按行取值的查表", "乘法的独热编码", "卷积的滑窗运算", "累加的直方图"],
+          "answer": 0,
+          "explain": "本质是可训练查找表：输入 token ID，返回权重矩阵的对应行。等价于独热编码乘权重矩阵，但高效得多。"
+        },
+        {
+          "q": "GPT 为什么必须加位置嵌入？",
+          "options": ["自注意力不感知位置", "词嵌入维度不足", "批量训练需要填充", "词表存在未知词"],
+          "answer": 0,
+          "explain": "自注意力是置换等变的：同一 ID 在任何位置查出的向量都相同，必须显式注入位置信息。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：第 2 章通关。你能画出完整的输入管道（原文 → BPE → ID → 滑动窗口 → 嵌入+位置 → [8, 4, 256] 张量），并回答"GPT 为什么没有未知 token"。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 4 课「注意力的直觉」</strong><br>
+    进入全书的心脏：注意力机制。从一个朴素的问题开始——"journey" 这个词想表达自己，该关注句中哪些词？我们将<b>不用任何可训练权重</b>，纯靠向量点积实现第一个自注意力。对应书 §3.1–3.3。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    强烈建议在进入注意力之前看一下 <a href="https://www.youtube.com/watch?v=eMlx5fFNoYc" target="_blank">3Blue1Brown 的注意力可视化视频</a>（22 分钟）——视觉直觉极佳。看完有不懂的地方，回来问我。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 3 课 · 主教材 §2.5–2.8 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch02" target="_blank">ch02</a> · BPE 原始论文 <a href="https://arxiv.org/abs/1508.07909" target="_blank">arXiv:1508.07909</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 8 课 · GPT 骨架</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 8 课 · Build a LLM From Scratch · 对应书 §4.1–4.4</p>
+  <h1>GPT 骨架：配置、LayerNorm、GELU、残差</h1>
+  <p class="subtitle">定好 GPT-2 124M 的完整配置，实现四个小零件。这一课结束，Transformer 块的备件就齐了。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：PyTorch 五件事",
+      "questions": [
+        {
+          "q": "训练循环里 zero_grad 的位置要求是？",
+          "options": ["反向传播之前", "反向传播之后", "损失计算之前", "参数更新之后"],
+          "answer": 0,
+          "explain": "梯度默认累加，backward 前必须清零，否则本轮混入上轮梯度。"
+        },
+        {
+          "q": "自定义模型里 forward 的作用是？",
+          "options": ["定义数据流经层", "定义梯度计算式", "定义损失函数值", "定义优化器步长"],
+          "answer": 0,
+          "explain": "forward 描述前向数据流；梯度由 autograd 自动处理。"
+        },
+        {
+          "q": "梯度存放在哪个属性里？",
+          "options": ["参数 grad 属性", "损失 item 方法", "优化器 state 字典", "模型 buffer 缓冲"],
+          "answer": 0,
+          "explain": "backward 把梯度写入各叶参数 .grad，step 读取它们更新。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>一张配置表，定义整个模型</h2>
+  <p>好消息：GPT 的架构出奇地简单——大部分组件是<b>重复</b>的。整个模型由一个配置字典驱动（书 §4.1）：</p>
+
+<pre><code class="language-python">GPT_CONFIG_124M = {
+    "vocab_size": 50257,    # BPE 词表大小（第 3 课）
+    "context_length": 1024, # 最大上下文长度（位置嵌入行数）
+    "emb_dim": 768,         # 嵌入维度（每 token 768 维向量）
+    "n_heads": 12,          # 注意力头数（第 6 课）
+    "n_layers": 12,         # Transformer 块堆叠层数
+    "drop_rate": 0.1,       # dropout 率
+    "qkv_bias": False,      # q/k/v 投影不加偏置（沿用 GPT-2 规范）
+}</code></pre>
+
+  <p>为什么选 124M（GPT-2 最小杯）？OpenAI 公开了它的预训练权重（第 12 课加载），笔记本就能跑；GPT-3 架构与之几乎相同，只是放大到 1750 亿参数——单个消费级 GPU 要训 665 年（书 §4.1 侧栏，p.111）。<b>架构一模一样，改变的只是数字</b>——这就是"可扩展架构"的含义。</p>
+  <span class="cite">——《书》§4.1, pp.109–116（列表 4.1）</span>
+
+  <h2><span class="secno">§2</span>零件 1：LayerNorm——给激活定规矩</h2>
+  <p>深层网络训练的大敌：<span class="term">梯度消失/爆炸<span class="en">（vanishing/exploding gradients）</span></span>——激活值逐层漂移，训练失稳。<span class="term">层归一化<span class="en">（LayerNorm）</span></span>的做法：对每个 token 的 768 维激活，统一调成<b>均值 0、方差 1</b>，再交给两个可训练参数重新缩放平移：</p>
+
+<pre><code class="language-python">class LayerNorm(nn.Module):
+    def __init__(self, emb_dim):
+        super().__init__()
+        self.eps = 1e-5                                   # 防除零的小常数
+        self.scale = nn.Parameter(torch.ones(emb_dim))    # γ 可训练
+        self.shift = nn.Parameter(torch.zeros(emb_dim))   # β 可训练
+
+    def forward(self, x):
+        mean = x.mean(dim=-1, keepdim=True)
+        var  = x.var(dim=-1, keepdim=True, unbiased=False)  # 有偏方差：÷n（兼容 GPT-2）
+        norm_x = (x - mean) / torch.sqrt(var + self.eps)
+        return self.scale * norm_x + self.shift</code></pre>
+
+  <div class="sidenote">为什么用 LayerNorm 而不是 BatchNorm（书 p.122 侧栏）？BatchNorm 沿<b>批维度</b>归一化，对批量大小敏感；LayerNorm 对<b>每个样本独立</b>按特征维归一化——分布式训练、小批量、单条推理全都稳定。LLM 清一色选它。另外注意 <code>dim=-1</code> 的巧思：不管张量是 2D 还是 [batch, token, emb_dim] 的 3D，永远作用于最后一维（嵌入维）。</div>
+  <span class="cite">——《书》§4.2, pp.116–122（列表 4.2）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>零件 2：GELU——更聪明的激活函数</h2>
+  <p>ReLU 把负数一刀切为零——简单粗暴，但零点有个"尖角"，且负值神经元彻底躺平。GPT 用<span class="term">GELU<span class="en">（Gaussian Error Linear Unit）</span></span>：平滑曲线，负值也有微小的非零输出（约 −0.17 的谷底），梯度处处可用。书里用 GPT-2 同款的 tanh 近似式：</p>
+
+<pre><code class="language-python">class GELU(nn.Module):
+    def forward(self, x):
+        return 0.5 * x * (1 + torch.tanh(
+            torch.sqrt(torch.tensor(2.0 / torch.pi)) *
+            (x + 0.044715 * torch.pow(x, 3))
+        ))</code></pre>
+
+  <span class="cite">——《书》§4.3, pp.122–124（列表 4.3）</span>
+
+  <h2><span class="secno">§4</span>零件 3：前馈网络 FFN——先扩张 4 倍再压缩</h2>
+
+<pre><code class="language-python">class FeedForward(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(cfg["emb_dim"], 4 * cfg["emb_dim"]),  # 768 → 3072（扩 4 倍）
+            GELU(),
+            nn.Linear(4 * cfg["emb_dim"], cfg["emb_dim"]),  # 3072 → 768（压回）
+        )
+    def forward(self, x):
+        return self.layers(x)      # [b, T, 768] → [b, T, 768]，形状不变</code></pre>
+
+  <p>分工记住一句话：<b>注意力负责词与词之间的交流，FFN 负责每个词独立地深加工</b>（书 §4.5, p.132）。升维 4 倍 = 在更宽敞的空间里做非线性变换，再压回来——这是 Transformer 的标准配方。</p>
+  <span class="cite">——《书》§4.3, pp.124–127（列表 4.4）</span>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>零件 4：残差连接——梯度的生命线</h2>
+  <p><span class="term">快捷连接<span class="en">（shortcut / residual connection）</span></span>：把一层的输入<b>直接加到</b>更深层的输出上（x = x + layer(x)）。它为反向传播的梯度开了一条<b>高速公路</b>，梯度可以绕过深层的连乘直接流回浅层——这就是 ResNet 治好梯度消失的药方。书里的 5 层对比实验（平均绝对梯度）：</p>
+  <table>
+    <tr><th>层</th><th>无残差</th><th>有残差</th></tr>
+    <tr><td>layers.0（最浅）</td><td>0.0002 ⚠️ 几乎消失</td><td>0.2217 ✅ 健康</td></tr>
+    <tr><td>layers.4（最深）</td><td>0.0050</td><td>1.3259 ✅</td></tr>
+  </table>
+  <p>无残差时浅层梯度比深层小 25 倍——最需要学习的层反而学不动。有残差后各层梯度量级一致。</p>
+  <span class="cite">——《书》§4.4, pp.127–131（列表 4.5，图 4.12）</span>
+
+  <h2><span class="secno">§6</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "GPT-2 124M 的嵌入维度与层数是？",
+          "options": ["768 维和 12 层", "1024 维和 24 层", "1280 维和 36 层", "1600 维和 48 层"],
+          "answer": 0,
+          "explain": "768 维 × 12 头 × 12 层。后三个选项分别是 medium / large / XL 的配置。"
+        },
+        {
+          "q": "LayerNorm 归一化的对象是？",
+          "options": ["每个样本的特征维", "整个批次的样本间", "全部层激活的总体", "词表内词元之间"],
+          "answer": 0,
+          "explain": "对每个 token 的嵌入维（dim=-1）独立归一化为均值 0 方差 1，与批量大小无关。"
+        },
+        {
+          "q": "LayerNorm 里 scale 和 shift 是？",
+          "options": ["可训练的参数", "固定的超参数", "随机数的种子", "输入的统计量"],
+          "answer": 0,
+          "explain": "γ 和 β 可训练——归一化后允许模型自己学最优的缩放与平移。"
+        },
+        {
+          "q": "GELU 相比 ReLU 的核心优势是？",
+          "options": ["平滑且负值有输出", "计算量大幅更小", "输出永远为整数", "不需要梯度计算"],
+          "answer": 0,
+          "explain": "平滑曲线利于深层优化；负输入也给小的非零输出，神经元不至于彻底失活。"
+        },
+        {
+          "q": "FeedForward 的维度变化是？",
+          "options": ["768 扩到 3072 再收回", "768 直接降到 384 保留", "3072 扩到 768 继续扩", "768 保持不变直通到底"],
+          "answer": 0,
+          "explain": "Linear→GELU→Linear：先 4 倍扩张做非线性加工，再压回原维度，形状不变可任意堆叠。"
+        },
+        {
+          "q": "残差连接解决的核心问题是？",
+          "options": ["浅层梯度消失", "模型参数过多", "训练数据太少", "词表规模过大"],
+          "answer": 0,
+          "explain": "输入直加输出 = 梯度高速公路，反向传播时梯度不再逐层衰减（实验：0.0002 → 0.22）。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：四个零件全齐（LayerNorm / GELU / FeedForward / 残差），配置字典能默写关键数字（50257 / 1024 / 768 / 12 / 12）。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 9 课「总装 GPT」</strong><br>
+    把所有零件装进 TransformerBlock（注意力的上层建筑），再堆 12 层 + 输出头，得到完整的 GPT-2 124M。还要算清一笔账：为什么代码数出来 163M，官方却说 124M？对应书 §4.5–4.6。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    LayerNorm 的维度问题（dim=-1 到底归一化谁）是新手最高频的坑——在纸上画一个 [2, 5] 的矩阵亲手减均值除方差，五分钟根治。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 8 课 · 主教材 §4.1–4.4 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch04" target="_blank">ch04</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

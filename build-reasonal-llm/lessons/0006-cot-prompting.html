@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 6 课 · CoT 提示 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 6 课 · CoT 提示：五个字的收益</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §4.1–4.3</span>
+    <span class="chip">⏱ 15–20 分钟</span>
+    <span class="chip">🎯 收获：一行提示把 base 模型数学准确率 15% → 40%</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>从这课起进入 <strong>Stage 3：推理时算力扩展</strong>——不动权重，用更多推理时的计算换准确率。第一个方法便宜到离谱：在 prompt 末尾加一句话。它也是你工作里<strong>性价比最高的一招</strong>：不改模型、不加基础设施，一行提示代码。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>两大策略的分岔口</h2>
+
+  <p>改进推理只有两条路<span class="cite">BRM §4.1</span>：<strong>加训练算力</strong>（第 11–15 课）或<strong>加推理算力</strong>（本阶段）。后者指：模型已训练好、权重冻结，在生成答案时让它干更多活——生成更多 token"想得更久"、采样多个答案、迭代打磨。</p>
+
+  <p>书里精选三种推理时方法（从十多种候选、数千次实验中挑出）<span class="cite">BRM §4.1</span>：</p>
+
+  <div class="map-grid">
+    <div class="bucket b1">
+      <h4>方法 1：拉长 CoT</h4>
+      <b>串行</b>——提示让模型写出推理过程，答案更长。<br><span class="b-ch">本课</span>
+    </div>
+    <div class="bucket b2">
+      <h4>方法 2：并行采样投票</h4>
+      <b>并行</b>——self-consistency：采多个答案投票选众数。<br><span class="b-ch">第 7–8 课</span>
+    </div>
+    <div class="bucket b3">
+      <h4>方法 3：迭代自我修正</h4>
+      <b>串行</b>——self-refinement：模型审视并重写自己的答案。<br><span class="b-ch">第 9–10 课</span>
+    </div>
+  </div>
+
+  <p>三者共同点：都要生成更多 token = 更多前向传播 = 更贵。<strong>"推理时扩展"的本质就是这笔交易。</strong>（生产系统也在用：Anthropic 的 Claude 4 就用了并行采样<span class="cite">BRM §4.1</span>。）</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>CoT 提示实操</h2>
+
+  <p>测试题（来自 MATH-500）："$3x-9$ 的一半是 $x+37$，求 $x$"。裸模板下 base 模型答 <code>\boxed{20}</code>——错（正确 83）<span class="cite">BRM §4.2</span>。加上一句话：</p>
+
+<pre><code>prompt_cot = prompt + "\n\nExplain step by step."
+response_cot = generate_text_stream_concat_flex(
+    model, tokenizer, prompt_cot, device, max_new_tokens=2048)</code></pre>
+
+  <p>模型于是写出完整推导——设方程、两边乘 2、移项合并——最后 <code>\boxed{83}</code> ✅<span class="cite">BRM §4.3</span>。"Explain step by step" 是书里的选择；经典原始论文用的是 "Let's think step by step"（<a href="https://arxiv.org/abs/2205.11916">Kojima et al. 2022</a>），措辞可依模型调优。</p>
+
+  <div class="callout key">
+    <span class="co-label">CoT 为什么有效</span>① 逐步走给模型<b>更多自我纠错的机会</b>——每一步都是一次重新 conditioned 的预测；② 训练数据里的数学/逻辑题大多带详细解答，要求 CoT 与模型学到的模式<b>对齐</b>。注意：CoT <b>不提供新知识</b>，只是改变模型调用已有知识的方式。<span class="cite">BRM §4.3 侧栏</span>
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>收益与局限（全量 MATH-500 实测）</h2>
+
+  <table>
+    <thead><tr><th>方法（base 模型）</th><th>准确率</th><th>耗时</th></tr></thead>
+    <tbody>
+      <tr><td>裸模板 + 贪心解码（第 5 课基线）</td><td>15.2%</td><td>10.1 min</td></tr>
+      <tr><td><b>+ CoT 提示</b></td><td><b>40.6%</b></td><td>84.5 min</td></tr>
+      <tr><td>官方 reasoning 模型（参照）</td><td>48.2%</td><td>182.1 min</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · 500 题全集，CUDA。<span class="cite">BRM table 4.1 行 1–3</span></p>
+
+  <p>三个诚实的注脚<span class="cite">BRM §4.3</span>：</p>
+  <ul>
+    <li><b>时间翻了 8 倍</b>——推理步骤本身就是 token，每个 token 都要一次前向传播。这就是第 1 课说的"贵因之一"。</li>
+    <li><b>CoT 不是万能药</b>：简单题上可能反而降准（多写步骤 = 多犯错机会），即 <span class="term">overthinking</span>；错误推理也会"自信地"写出来。</li>
+    <li><b>训练过的推理模型不需要它</b>：Qwen3 reasoning 版本来就边写边想，再喊 "explain step by step" 无增益。CoT 提示的价值在<strong>未被训练成推理模型的模型</strong>上。</li>
+  </ul>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">04</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>CoT 提示 = 让模型先写过程再给答案，base 模型 15% → 40%，代价是 8 倍生成时间；对简单题和已训练的推理模型可能无益甚至有害。</strong>
+  </div>
+
+  <h2><span class="secno">05</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/2205.11916">Large Language Models are Zero-Shot Reasoners</a>（Kojima et al., 2022）——"Let's think step by step" 的出处，两页正文，值得读。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0007-temperature-and-top-p.html">温度与 top-p</a>——把 argmax 换成采样，让同一个模型能给出<b>不同</b>的答案。这是投票的前提。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：比如"CoT 和 few-shot 示例提示怎么选"、"overthinking 在生产里怎么防"。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0005-eval-harness.html">← 第 5 课</a>
+    <a class="nav-next" href="0007-temperature-and-top-p.html">第 7 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 6 课检索练习",
+    questions: [
+      {
+        question: "CoT 提示让模型准确率大幅提升的机制是？",
+        options: ["模型学到了新的知识", "改变了调用已有知识的方式", "模型权重被临时更新", "模型调用了外部工具"],
+        answer: 1,
+        explain: "BRM §4.3 侧栏：CoT 不提供新知识；它给模型更多自我纠错机会，并让生成方式对齐训练数据里带解答的格式。"
+      },
+      {
+        question: "CoT 提示的主要代价是什么？",
+        options: ["需要额外的训练数据", "需要重新微调权重", "生成 token 变多耗时变长", "必须使用更大模型"],
+        answer: 2,
+        explain: "推理步骤都是 token，每个 token 一次前向传播——15.2%→40.6% 的同时耗时 10 min→84.5 min。"
+      },
+      {
+        question: "什么模型通常【不需要】CoT 提示？",
+        options: ["未经指令微调的模型", "已训练过的推理模型", "参数量很小的模型", "只用 CPU 跑的模型"],
+        answer: 1,
+        explain: "BRM §4.3：reasoning 变体本来就生成解释，再提示无增益；CoT 的价值在 base/普通模型上。"
+      },
+      {
+        question: "「overthinking」指的是什么现象？",
+        options: ["模型生成过长而跑出显存", "模型思考太久导致超时", "简单题上多写步骤反而答错", "模型反复输出同样的内容"],
+        answer: 2,
+        explain: "BRM §4.3：CoT 在简单问题上可能引入多余步骤、生成误导性解释而降准——推理不是越多越好。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

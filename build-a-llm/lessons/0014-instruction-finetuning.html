@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 14 课 · 指令微调</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 14 课 · Build a LLM From Scratch · 对应书第 7 章</p>
+  <h1>指令微调：从补全机器到听话助手</h1>
+  <p class="subtitle">ChatGPT 的最后一课：用 Alpaca 格式的指令数据训练模型"听懂人话"，再请 Llama 3 当阅卷老师自动打分。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的手术",
+      "questions": [
+        {
+          "q": "分类微调动用了哪些可训练参数？",
+          "options": ["输出头加末块与终归一层", "只动输出头的两个权重", "全模型所有层全部解冻", "只动嵌入层的两个矩阵"],
+          "answer": 0,
+          "explain": "换新 out_head（唯一必须）+ 解冻最后一个块和 final_norm（涨点）。其余冻结。"
+        },
+        {
+          "q": "分类为什么取最后一个 token 的输出？",
+          "options": ["因果掩码下它看全句", "它携带最大的位置值", "它没有被 dropout 影响", "它总是最靠近标签"],
+          "answer": 0,
+          "explain": "只有最后一个 token 对全部前文做过注意力——序列信息的汇聚点。"
+        },
+        {
+          "q": "短信被填充到等长用的 token ID 是？",
+          "options": ["50256 号词元", "0 号词元", "100 号词元", "50257 号词元"],
+          "answer": 0,
+          "explain": "复用 <|endoftext|>（ID 50256）当 pad token。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>补全机器的问题</h2>
+  <p>预训练 GPT 是<b>文本补全机器</b>：给它"把这句改成被动语态"的指令，它大概率接着编下去而不是执行。书里实测：微调前直接问 gpt2-medium 垃圾短信判断，它只会复读问题（第 13 课也见过）。<span class="term">指令微调<span class="en">（instruction finetuning / supervised instruction finetuning）</span></span>的解法朴素得惊人：<b>拿"指令 + 标准回答"对，继续训练</b>。</p>
+  <p class="cite">——《书》§7.1, pp.234–236</p>
+
+  <h2><span class="secno">§2</span>Alpaca 格式：指令的模板</h2>
+  <p>数据集：书配套的 1,100 条指令-响应对（204KB JSON），每条含 instruction / input / output 三字段。用 <span class="term">Alpaca 提示样式<span class="en">（Alpaca prompt style）</span></span>拼成训练文本（斯坦福 Alpaca 首创，另有微软 Phi-3 的 <code>&lt;|user|&gt;/&lt;|assistant|&gt;</code> 风格——本质相同：给指令划好"考场"）：</p>
+
+<pre><code class="language-python">def format_input(entry):
+    instruction_text = (
+        "Below is an instruction that describes a task. "
+        "Write a response that appropriately completes the request."
+        f"\n\n### Instruction:\n{entry['instruction']}"
+    )
+    input_text = (f"\n\n### Input:\n{entry['input']}"
+                  if entry["input"] else "")
+    return instruction_text + input_text
+# 完整训练文本 = format_input(entry) + f"\n\n### Response:\n{entry['output']}"</code></pre>
+
+  <p>85/10/5 切分为训练/验证/测试集。</p>
+  <span class="cite">——《书》§7.2, pp.236–241（图 7.4）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>自定义 collate：只学回答，不背题目</h2>
+  <p>指令微调批处理最精妙的设计。变长样本按<b>每个批次内最长</b> pad（不是全数据集最长，省填充）；目标仍是右移一位。关键一步：<b>把"不该学"的目标位置改成 -100</b>：</p>
+
+<pre><code class="language-python">def custom_collate_fn(batch, pad_token_id=50256, ignore_index=-100,
+                      allowed_max_length=None, device="cpu"):
+    batch_max_length = max(len(item) + 1 for item in batch)
+    inputs_lst, targets_lst = [], []
+    for item in batch:
+        new_item = item.copy() + [pad_token_id]
+        padded = new_item + [pad_token_id] * (batch_max_length - len(new_item))
+        inputs  = torch.tensor(padded[:-1])     # 输入
+        targets = torch.tensor(padded[1:])      # 目标：右移一位
+        mask = targets == pad_token_id
+        indices = torch.nonzero(mask).squeeze()
+        if indices.numel() > 1:                 # 保留第一个 50256（学"何时停"），
+            targets[indices[1:]] = ignore_index # 其余填充位 → -100
+        ...
+    return inputs_tensor, targets_tensor</code></pre>
+
+  <p>为什么是 -100？PyTorch 的 <code>cross_entropy(..., ignore_index=-100)</code> <b>默认忽略</b>目标为 -100 的位置（书里用 2→3 个 token 的小实验证明：加 -100 目标后损失与不加时完全相同）。于是：pad 不算损失；连<b>指令部分的 target 也可屏蔽</b>——损失只算在 <code>### Response:</code> 的内容上。模型专心学"怎么答"，不用浪费容量背"怎么抄题目"，还能减少过拟合。保留的那一个 50256 教会模型<b>何时输出结束符</b>（生成时用作停止信号）。</p>
+  <span class="cite">——《书》§7.3–7.4, pp.242–258（列表 7.5，图 7.11–7.13）</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>训练：gpt2-medium + 复用五步咒</h2>
+  <p>这次加载 <b>gpt2-medium（355M）</b>——124M 容量太小学不好听指令（1.42GB 权重，M 系 Mac 需 16GB 内存级别）。训练代码与预训练<b>一模一样</b>：AdamW lr=5e-5、weight_decay=0.1、2 个 epoch、五步咒原样，损失从 2.64 一路降到 0.30。epoch 中途的样文已经像样了：</p>
+  <blockquote>### Instruction: 将主动句改为被动句："The chef cooks the meal every day."<br>
+  ### Response: The meal is cooked by the chef every day. ✅</blockquote>
+  <span class="cite">——《书》§7.5–7.6, pp.258–266（列表 7.8）</span>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>用 LLM 批改 LLM</h2>
+  <p>生成任务没有"分类准确率"这样的客观分。书的方案（AlpacaEval 思路）：让本地跑的 <b>Llama 3 8B</b>（Ollama，REST API）当阅卷老师——给定题目和标准答案，给模型回答打 0–100 分。它能打出"部分分"：明喻题答"快如子弹"给 85 分（合理但不如"闪电"生动）；云类题答"积云"给 40 分（相关但错误——应为积雨云）。</p>
+  <table>
+    <tr><th>模型</th><th>测试集平均分</th></tr>
+    <tr><td>微调后的 gpt2-medium 355M</td><td>50+</td></tr>
+    <tr><td>Llama 3 8B 基座（未指令微调）</td><td>58.51</td></tr>
+    <tr><td>Llama 3 8B Instruct（官方指令微调）</td><td><b>82.6</b></td></tr>
+  </table>
+  <p class="cite">——《书》§7.7–7.8, pp.267–282 —— 1,100 条数据微调出 50+ 分已属高效；82.6 说明海量指令数据 + 大模型的威力。要继续涨：更多数据、更多 epoch 调参、更大底座。</p>
+
+  <div class="sidenote">主线在此收官（书 §7.9）：架构 → 预训练 → 加载权重 → 分类微调 → 指令微调，LLM 开发全周期你已走完。此后还有<b>偏好微调<span class="en">（preference tuning，如 DPO）</span></b>——让回答更对人类胃口，见书 GitHub 04_preference-tuning-with-dpo。</div>
+
+  <h2><span class="secno">§6</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "指令微调的核心思路是？",
+          "options": ["用指令和回答对继续训练", "给模型扩充更大的词表", "把注意力改成双向的", "给输出加规则的过滤器"],
+          "answer": 0,
+          "explain": "监督指令微调 = 在『指令→标准响应』数据上接着训练，把补全机器变成听话助手。"
+        },
+        {
+          "q": "Alpaca 格式用哪些段落标记？",
+          "options": ["指令输入与响应", "用户助手与系统", "问题选项与答案", "开头中间和结尾"],
+          "answer": 0,
+          "explain": "### Instruction / ### Input / ### Response 三段式；Phi-3 才用 <|user|>/<|assistant|>。"
+        },
+        {
+          "q": "目标中的 -100 起什么作用？",
+          "options": ["让损失忽略该位置", "标记序列的起点", "表示低权重的词元", "触发提前的停止"],
+          "answer": 0,
+          "explain": "cross_entropy 默认 ignore_index=-100：填充位与指令位不计损失，模型只学响应。"
+        },
+        {
+          "q": "为何保留一个 50256 在目标里？",
+          "options": ["教会模型停笔", "对齐批次的长度", "标记输入的开头", "提升注意力得分"],
+          "answer": 0,
+          "explain": "学会何时生成 <|endoftext|>，生成时以此作为『回答完毕』的停止信号。"
+        },
+        {
+          "q": "指令微调为什么选 355M 而非 124M？",
+          "options": ["小模型容量不足", "大模型下载更快", "小模型显存占用大", "大模型词表更小"],
+          "answer": 0,
+          "explain": "听懂指令需要容量学习和保留复杂模式；124M 效果不佳（书 §7.5）。"
+        },
+        {
+          "q": "本章用 Llama 3 做什么？",
+          "options": ["给回答自动打分", "生成训练的数据", "替代原来的优化器", "压缩微调的模型"],
+          "answer": 0,
+          "explain": "LLM-as-judge：按标准答案给微调模型回答打 0–100 分并给理由（AlpacaEval 思路）。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你走完了 LLM 开发的完整生命周期（架构 → 预训练 → 权重 → 两种微调），理解了 -100 屏蔽这个面试能讲五分钟的精妙细节，还见识了"LLM 当裁判"的现代评估范式。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 15 课「训练技巧」</strong><br>
+    附录 D 的三件专业装备：学习率预热（先热身再冲刺）、余弦衰减（逐渐收油门）、梯度裁剪（防梯度爆炸）。让训练曲线更稳的工业级配方。对应书附录 D。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    "为什么指令部分也要屏蔽？"值得在纸上画一遍 input/target 对齐图（书图 7.13）：看到答案区之外全是 -100，这个设计就刻进脑子里了。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 14 课 · 主教材第 7 章 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch07" target="_blank">ch07</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

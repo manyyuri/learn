@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>术语表 · Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="ref-header">
+  <div class="lesson-kicker">Reference · 参考文档</div>
+  <h1 class="lesson-title">术语表 <span style="font-size:1.1rem;color:var(--ink-soft)">Glossary</span></h1>
+  <p class="lesson-meta">
+    <span class="chip">全书通用 · 已覆盖 ch1–8</span>
+    <span class="chip">术语以本书用法为准（BRM）</span>
+  </p>
+</header>
+
+<div class="ref-body">
+
+  <p>每课出现的新术语都会收录在这里。<strong>中文课、英文术语</strong>——因为论文、代码、报错信息里用的都是英文。出处缩写 <span class="cite">BRM</span> = <em>Build a Reasoning Model (From Scratch)</em>。</p>
+
+  <!-- ============ 推理核心 ============ -->
+  <div class="gloss-group">
+    <h3>推理核心 · Reasoning（ch1）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>推理 <span class="en">reasoning</span></dt>
+        <dd>（工程定义）模型在给出最终答案<b>之前生成中间步骤</b>。中间步骤可以展示给用户，也可包在 <code>&lt;think&gt;…&lt;/think&gt;</code> 这类特殊标签里隐藏。本质：把 token 花在中间解题过程上，而不是直接跳到结论。<span class="src">BRM §1.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>思维链 <span class="en">chain-of-thought, CoT</span></dt>
+        <dd>中间步骤式生成的俗称：模型"一步一步思考"，把推理过程显式写出来。既可指一种<b>提示技术</b>（"think step by step"），也可指推理模型的<b>输出形态</b>。<span class="src">BRM §1.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>推理模型 <span class="en">reasoning model</span></dt>
+        <dd>经过训练或提示改进、能稳定产生上述中间步骤的 LLM，在数学/编码/逻辑难题上准确率更高。例：OpenAI o1/o3、DeepSeek-R1、Qwen3（思考模式）。<span class="src">BRM §1.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>思考标签 <span class="en">&lt;think&gt; tokens</span></dt>
+        <dd>把中间推理步骤与最终答案分隔开的特殊标记。对用户可隐藏，但模型生成时真实存在；蒸馏数据用它包裹教师思考过程（ID 151667/151668），ch7 还用它设计过格式奖励。<span class="src">BRM §7.6, §8.3</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>模式匹配 <span class="en">pattern matching</span></dt>
+        <dd>模型基于训练数据中的统计关联续写文本，而非显式应用逻辑规则。"德国的首都是柏林"= 强统计关联的回忆，不是逻辑推导。<span class="src">BRM §1.4</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>封闭世界 / 开放世界 <span class="en">closed-world / open-world</span></dt>
+        <dd>封闭世界：只依据题给前提做推论（"所有鸟都会飞+企鹅是鸟 ⇒ 企鹅会飞"是有效推论）。开放世界：允许背景知识参与，可能与前提冲突。好系统应察觉矛盾。<span class="src">BRM §1.4</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 训练管线 ============ -->
+  <div class="gloss-group">
+    <h3>训练管线 · Training Pipeline（ch1）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>预训练 <span class="en">pre-training</span></dt>
+        <dd>在海量无标注文本（TB 级、万亿 token）上做下一 token 预测，学到语言模式与涌现能力。成本：数千 GPU · 数月 · 数百万美元。产出：base model。<span class="src">BRM §1.2</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>后训练 <span class="en">post-training</span></dt>
+        <dd>在 base model 之上让它变得可用：= 指令微调（SFT）+ 偏好微调（preference tuning，常经 RLHF 实现）。<span class="src">BRM §1.2</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>指令微调 <span class="en">supervised fine-tuning, SFT / instruction tuning</span></dt>
+        <dd>用"指令→理想回答"的标注数据做监督微调，让模型会听指令（问答、摘要、翻译）。蒸馏本质上就是拿教师数据做 SFT。<span class="src">BRM §1.2, §8.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>RLHF <span class="en">Reinforcement Learning with Human Feedback</span></dt>
+        <dd>用<b>人类</b>对回答的评估/排序（常先训练奖励模型替代人工）作为奖励信号做强化学习。用于常规 LLM 的偏好对齐。<span class="src">BRM §1.3, §6.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>RLVR <span class="en">Reinforcement Learning with Verifiable Rewards</span></dt>
+        <dd>用<b>自动验证器</b>（如：数学答案对不对、代码能否通过测试）作为奖励信号做强化学习。比人类反馈更客观、可规模化，是推理模型训练（DeepSeek-R1、本书 ch6–7）的核心。<span class="src">BRM §1.3, §6.1</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 三大流派 ============ -->
+  <div class="gloss-group">
+    <h3>改进推理的三大流派 · Three Approaches（ch1, 终局对比见 0016）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>推理时算力扩展 <span class="en">inference-time compute scaling / test-time scaling</span></dt>
+        <dd><b>不改权重</b>，在推理时多花算力换性能：CoT 提示、温度采样、self-consistency 投票、self-refinement。本书 ch4–5。书中最佳：52.0%（CoT+投票 n=10）。<span class="src">BRM §1.3</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>强化学习（推理） <span class="en">reinforcement learning for reasoning</span></dt>
+        <dd><b>改权重</b>：用奖励信号（常为 RLVR）让模型在试错中学会并精炼推理策略。本书 ch6–7 的 GRPO，50 步 15.2%→47.4%。<span class="src">BRM §1.3</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>蒸馏 <span class="en">distillation</span></dt>
+        <dd>用更强的教师模型生成高质量推理轨迹，对小模型做 SFT，把推理模式"搬"进小模型。与传统深度学习蒸馏（学 logits）不同，本书的 hard 蒸馏只学输出文本。ch8：15.2%→45.0%。<span class="src">BRM §1.3, §8.8</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 生成机制 ============ -->
+  <div class="gloss-group">
+    <h3>生成机制 · Generation（ch1–2）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>token</dt>
+        <dd>模型处理文本的最小单位：一个整词、词的一部分或标点。文本先由 tokenizer 切成 token 再转成 ID。<span class="src">BRM §1.2</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>自回归生成 <span class="en">autoregressive generation</span></dt>
+        <dd>每次基于已有序列预测下一个 token，逐个追加，循环往复。LLM"推理"也是这样逐 token 产生的——因此不保证逻辑正确。<span class="src">BRM §1.1, fig 1.8</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>前向传播 <span class="en">forward pass</span></dt>
+        <dd>模型对当前序列做一次完整计算得到下一个 token 的分布。生成 N 个 token ≈ N 次前向传播——这是推理模型更贵的第一个原因。<span class="src">BRM §1.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>logits</dt>
+        <dd>模型输出层给出的每个候选 token 的<b>原始分数</b>（未归一化）。Qwen3 0.6B 每步输出 151,936 个。softmax 归一化后才是概率。<span class="src">BRM §4.4</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>贪心解码 <span class="en">greedy decoding / argmax</span></dt>
+        <dd>每步选 logits 最大的 token。确定、可复现，但同一题永远同一个答案；投票类方法必须绕开它。<span class="src">BRM §2.4, §4.4</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>KV 缓存 <span class="en">KV cache</span></dt>
+        <dd>缓存已算过的 key/value 投影，新 token 只需算增量——把每步成本从 O(L²) 降到 O(L)。配 torch.compile 后书里 5 t/s → 68 t/s（13 倍）。<span class="src">BRM §2.6–2.7</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>EOS token <span class="en">end of sequence</span></dt>
+        <dd>终止符（Qwen3 为 &lt;|endoftext|&gt;，ID 151643）。RL 训练时保留它在 rollout 里，防止模型忘怎么停。<span class="src">BRM §2.4, §6.5</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 评估 ============ -->
+  <div class="gloss-group">
+    <h3>评估 · Evaluation（ch3）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>MATH-500</dt>
+        <dd>书中的标准评估集：500 道数学题，含 problem/answer/solution 字段。全书所有准确率都在它上量。base 15.2% / reasoning 48.2% 是两大基准线。<span class="src">BRM §3.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>\boxed{} 抽取</dt>
+        <dd>答案抽取约定：取最后一个 \boxed{...}（按括号深度解析嵌套），再经 LaTeX 规范化后与标准答案比对。<span class="src">BRM §3.4–3.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>验证器 <span class="en">verifier</span></dt>
+        <dd>"已知标准答案"时自动判对错的程序（LaTeX 规范化 + SymPy 符号等价）。评估时当裁判，RLVR 时当奖励来源——全书地基。<span class="src">BRM §3.5–3.7, §6.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>提示敏感度 <span class="en">prompt sensitivity</span></dt>
+        <dd>同一道题换模板准确率可 ±50%。评估必须固定模板，否则数字不可比；工作里看别人报的分数必先问模板。<span class="src">BRM §3.8</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>数据泄漏 <span class="en">data leakage</span></dt>
+        <dd>评估题混进训练集导致虚高。MATH 训练 12,000 题与 MATH-500 互不重叠就是为了防它（ch6 RL 和 ch8 蒸馏都用这批训练题）。<span class="src">BRM §6.4</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 解码与采样 ============ -->
+  <div class="gloss-group">
+    <h3>解码与采样 · Decoding & Sampling（ch4）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>温度缩放 <span class="en">temperature scaling</span></dt>
+        <dd>logits ÷ T 后再 softmax：T&lt;1 分布更尖（更确定），T&gt;1 更平（更多样），T=0 等价贪心。书里 0.7–1.0 区间性能最稳。<span class="src">BRM §4.4.2</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>Top-p / 核采样 <span class="en">nucleus sampling</span></dt>
+        <dd>按概率降序累加，只保留累积概率达 p 的最小 token 集合，其余清 -inf 再归一化采样——砍掉长尾垃圾 token。与固定个数的 top-k 相比保留集大小自适应。<span class="src">BRM §4.5</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>CoT 提示 <span class="en">CoT prompting</span></dt>
+        <dd>在 prompt 末尾加 "Explain step by step." 等引导，让 base 模型先写过程再给答案：15.2%→40.6%，代价约 8 倍生成时间；推理模型已内化此能力，加了反而 overthinking。<span class="src">BRM §4.2–4.3</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>Self-consistency 自洽投票</dt>
+        <dd>温度采样 N 份 CoT 解答，抽取各自答案，<b>多数票</b>定最终答案。书里 n=10 到 52.0%（超过单次 reasoning 的 48.2%），但耗时 ×10。有效性前提：错误答案彼此分散、正确答案趋同。<span class="src">BRM §4.7</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>过度思考 <span class="en">overthinking</span></dt>
+        <dd>简单题也拉满思考预算：准确率不升、token 费用狂涨。对应"该 1 秒答的别想 1 分钟"。自适应推理预算（GPT-5 auto 模式）就是解药。<span class="src">BRM §8.9</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 概率与打分 ============ -->
+  <div class="gloss-group">
+    <h3>概率与打分 · Probability & Scoring（ch5）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>log-probability（logprob）</dt>
+        <dd>概率取对数，全在负数域：越接近 0 模型对该 token 越有信心。序列 logprob = 各 token logprob 之<b>和</b>。<span class="src">BRM §5.4</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>交叉熵 <span class="en">cross-entropy</span></dt>
+        <dd>= 正确 token 的<b>负平均</b> logprob。既是第 5 课的打分器，也是蒸馏训练的损失函数（书例：-16.63÷10≈1.68，与 F.cross_entropy 完全一致）。<span class="src">BRM §8.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>答案均值 logprob <span class="en">average logprob</span></dt>
+        <dd>序列 logprob ÷ 答案 token 数，消除长度偏差才能跨样本比较。<b>诚实教训</b>：它作为答案打分器在书中表现最差（≈不加打分器），"听起来合理"≠"有用"。<span class="src">BRM §5.4–5.5</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>LLM-as-a-judge / 打分器 <span class="en">scorer</span></dt>
+        <dd>"不知道标准答案"时用模型给候选答案打分。启发式 prompt 版（检查三要素）在书中最有效（reasoning 模型 25.0%→57.8%），平均 logprob 版反而最差。<span class="src">BRM §5.5–5.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>Self-refinement 自我改进</dt>
+        <dd>生成→打分→ critique → refine 的循环。仅当打分器能区分好坏时有效；打分器弱时多轮反而降分。RL 本质上就是"可微版 + 试错版"的同思想。<span class="src">BRM §5.7</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ RL 与 GRPO ============ -->
+  <div class="gloss-group">
+    <h3>RL 与 GRPO · Rollouts & Rewards（ch6–7）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>策略 <span class="en">policy</span></dt>
+        <dd>RL 黑话里"被训练的模型"本身。LLM 场景：policy = 当前权重的 LLM，输出 token 分布即策略的动作分布。<span class="src">BRM §6.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>rollout</dt>
+        <dd>让当前 policy 对一道题采样一个完整回答（就是第 8 课的温度采样循环）。GRPO 每题采 G 个（书里 8 个）。<span class="src">BRM §6.5</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>优势 <span class="en">advantage</span></dt>
+        <dd>组内相对分：r<sub>i</sub> − mean(组) 再除以 std（GRPO 风格）。比绝对奖励稳，天然形成"好的加强、差的削弱"。<span class="src">BRM §6.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>策略梯度损失 <span class="en">policy gradient loss</span></dt>
+        <dd><code>pg_loss = -(advantage.detach() × logprob).mean()</code>：把高优势 rollout 的每个 token 概率推高、低优势压低。<span class="src">BRM §6.7</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>GRPO <span class="en">Group Relative Policy Optimization</span></dt>
+        <dd>DeepSeek 推广的 RLVR 算法：组内归一化算优势、去掉 PPO 的 value model、（原版带 KL 项）。书里 50 步：15.2%→47.4%。<span class="src">BRM §6.8</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>KL 散度 <span class="en">KL divergence</span></dt>
+        <dd>两个分布的差异度量。RL 里常用于把新策略拴在参考模型附近防跑飞。书里的实验：对 0.6B 小模型加 KL 项反而<b>灾难性崩溃</b>（长度暴涨、熵爆炸→乱码）。<span class="src">BRM §7.3</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>裁剪比率 <span class="en">clipped policy ratio</span></dt>
+        <dd>限制新旧策略概率比 π_new/π_old 的单步移动幅度（书里 clip 到 [0.7, 1.4]），防止单批 rollout 过度拉扯权重。修复了书中 step 400 后的性能下滑。<span class="src">BRM §7.2</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>奖励黑客 <span class="en">reward hacking</span></dt>
+        <dd>模型钻奖励函数空子拿分而不解决任务。书例：格式奖励（think 标签 151667/151668）让模型学会<b>只输出标签不推理</b>。奖励设计必须验证"分数涨=能力涨"。<span class="src">BRM §7.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>熵 <span class="en">entropy</span></dt>
+        <dd>输出分布的不确定度。训练崩坏信号：熵爆炸=输出近乎均匀随机（乱码）；熵过低=模式坍缩。健康训练中熵温和上升（探索更多样解法）。<span class="src">BRM §7.4–7.5</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- ============ 蒸馏 ============ -->
+  <div class="gloss-group">
+    <h3>蒸馏 · Distillation（ch8）</h3>
+    <dl>
+      <div class="gloss-item">
+        <dt>教师 / 学生 <span class="en">teacher / student</span></dt>
+        <dd>教师 = 强但贵的大模型（书里 DeepSeek-R1 671B，MATH-500 91.2%）；学生 = 小而廉的模型（Qwen3 0.6B base）。学生学教师的推理轨迹而非教师本身。<span class="src">BRM §8.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>Hard / Soft 蒸馏</dt>
+        <dd>Hard：学生拿教师<b>生成文本</b>做 SFT 目标（本书/R1 路线）；Soft：对齐教师<b>完整概率分布</b>（KL，需 logits）。Hard 更实用：文本便宜好存，API 不给 logits。<span class="src">BRM §8.1</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>答案-only 损失 <span class="en">answer-only loss</span></dt>
+        <dd>cross-entropy 只算教师答案段（含 think 思考），prompt 段不算——prompt 是给定上下文，不是要学的东西。同第 9 课打分只看答案段的思想。<span class="src">BRM §8.6</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>训练/验证损失 <span class="en">train / validation loss</span></dt>
+        <dd>train loss 在当前优化中的样本上算（噪声大）；val loss 在固定留出集上算（干净）。蒸馏训练盯 val loss：骤降后趋平=健康，继续训收益递减。<span class="src">BRM §8.7–8.8</span></dd>
+      </div>
+      <div class="gloss-item">
+        <dt>同门教师效应</dt>
+        <dd>师生同家族（tokenizer、提示惯例、行文风格一致）蒸馏效果显著更好：Qwen→Qwen 45.0% vs R1→Qwen 33.6%。选教师，同家族优先。<span class="src">BRM §8.8</span></dd>
+      </div>
+    </dl>
+  </div>
+
+  <p style="margin-top:3rem;font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft)">已随第 16 课（全书完）更新完毕。</p>
+
+  <div class="lesson-nav">
+    <a href="../index.html">← 课程首页</a>
+    <a class="nav-next" href="../lessons/0016-distillation-eval-and-beyond.html">最后一课 →</a>
+  </div>
+</div>
+
+</body>
+</html>

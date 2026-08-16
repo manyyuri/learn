@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 5 课 · 查询、键、值与缩放点积</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 5 课 · Build a LLM From Scratch · 对应书 §3.4</p>
+  <h1>查询、键、值：给注意力装上可训练的旋钮</h1>
+  <p class="subtitle">三个权重矩阵 W_q、W_k、W_v，让"关注谁"从固定算术变成可学习的能力——这是 GPT 真正使用的注意力。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的三步曲",
+      "questions": [
+        {
+          "q": "简化自注意力的三步顺序是？",
+          "options": ["打分归一汇聚", "汇聚打分归一", "归一汇聚打分", "打分汇聚归一"],
+          "answer": 0,
+          "explain": "点积打分 → softmax 归一化 → 加权求和（汇聚）。"
+        },
+        {
+          "q": "点积在注意力中扮演什么角色？",
+          "options": ["相似度的量尺", "归一化的工具", "位置的编码器", "梯度的调节器"],
+          "answer": 0,
+          "explain": "点积越高，两个向量越对齐/相似，注意力分数越高。"
+        },
+        {
+          "q": "上下文向量是哪些向量的加权组合？",
+          "options": ["全部输入向量", "只有查询向量", "只有相邻词向量", "随机采样的词向量"],
+          "answer": 0,
+          "explain": "z⁽ⁱ⁾ = 全部输入向量按注意力权重的加权和（简化版里权重来自 x 自身的点积）。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>数据库类比：查询、键、值</h2>
+  <p>上一课的简化版有个大问题：注意力分数完全由输入向量<b>裸点积</b>决定——模型没有半点话语权。真正的自注意力给每个词发三个"分身"，来自数据库世界的类比（书 §3.4.1 侧栏，p.85）：</p>
+  <table>
+    <tr><th>角色</th><th>类比</th><th>职责</th><th>由谁投影而来</th></tr>
+    <tr><td><b>查询 q<span class="en">（query）</span></b></td><td>搜索词</td><td>"我想找什么"——主动打听别人的内容</td><td>x · W_q</td></tr>
+    <tr><td><b>键 k<span class="en">（key）</span></b></td><td>索引</td><td>"我有什么标签"——等着被匹配</td><td>x · W_k</td></tr>
+    <tr><td><b>值 v<span class="en">（value）</span></b></td><td>存储内容</td><td>"我的实际内容"——被取走的货</td><td>x · W_v</td></tr>
+  </table>
+  <p>注意力 = 用每个词的 <b>q</b> 去和所有词的 <b>k</b> 匹配（q·k 点积），再按匹配度取走对应的 <b>v</b>。三个矩阵 W_q、W_k、W_v 是可训练参数——训练让模型学会"该问什么问题、亮什么标签、交付什么内容"。</p>
+  <span class="cite">——《书》§3.4.1, pp.80–86</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>四步计算（含缩放）</h2>
+
+<pre><code class="language-python">x_2 = inputs[1]                                # 查询词 "journey" 的向量
+d_in, d_out = 3, 2                             # 教学示例：3 维 → 2 维
+
+W_query = torch.nn.Parameter(torch.rand(d_in, d_out))
+W_key   = torch.nn.Parameter(torch.rand(d_in, d_out))
+W_value = torch.nn.Parameter(torch.rand(d_in, d_out))
+
+query_2 = x_2 @ W_query                        # ① 每个词投影出 q、k、v
+keys    = inputs @ W_key                       #    全部词的键 [6, 2]
+values  = inputs @ W_value                     #    全部词的值 [6, 2]
+
+attn_scores_2 = query_2 @ keys.T               # ② q 与所有 k 点积 → 分数
+# → tensor([1.2705, 1.8524, 1.8111, 1.0795, 0.5577, 1.5440])
+
+d_k = keys.shape[-1]
+attn_weights_2 = torch.softmax(attn_scores_2 / d_k**0.5, dim=-1)  # ③ 缩放 + softmax
+
+context_vec_2 = attn_weights_2 @ values        # ④ 加权取值 → z⁽²⁾</code></pre>
+
+  <p>和上一课的骨架一模一样（打分→归一→汇聚），只有两处升级：①分数从 x·x 变成 q·k；②归一前多除了一个 <b>√d_k</b>。</p>
+
+  <h3>为什么除以 √d_k？（<span class="term">缩放点积注意力<span class="en">（scaled dot-product attention）</span></span>）</h3>
+  <p>嵌入维度一大（GPT 类模型 &gt;1000），点积的数值会水涨船高。而 softmax 对大数值的反应接近<b>阶跃函数</b>——最大值独占全部概率，其余几乎为零，<b>梯度趋近于 0</b>，训练会停滞。除以 √d_k 把分数拉回温和区间，保住可用的梯度（书 §3.4.1 侧栏，p.84）。这就是论文标题里 "Scaled Dot-Product Attention" 的由来。</p>
+  <span class="cite">——《书》§3.4.1, pp.80–86 · <a href="https://arxiv.org/abs/1706.03762" target="_blank">Attention Is All You Need, §3.2.1</a></span>
+
+  <div class="sidenote">两个"权重"别混淆（书 p.82 侧栏）：W_q/W_k/W_v 是<b>权重参数</b>——训练中优化的固定旋钮；α 是<b>注意力权重</b>——随输入动态变化的分数。前者是硬件，后者是实时流量。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>封装成类</h2>
+
+<pre><code class="language-python">import torch.nn as nn
+
+class SelfAttention_v1(nn.Module):
+    def __init__(self, d_in, d_out):
+        super().__init__()
+        self.W_query = nn.Parameter(torch.rand(d_in, d_out))
+        self.W_key   = nn.Parameter(torch.rand(d_in, d_out))
+        self.W_value = nn.Parameter(torch.rand(d_in, d_out))
+
+    def forward(self, x):
+        keys, queries, values = x @ self.W_key, x @ self.W_query, x @ self.W_value
+        attn_scores = queries @ keys.T                              # ω
+        attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
+        return attn_weights @ values                                # z
+
+# v2 版仅把 nn.Parameter 换成 nn.Linear（更优的权重初始化 + 偏置选项）
+class SelfAttention_v2(nn.Module):
+    def __init__(self, d_in, d_out, qkv_bias=False):
+        super().__init__()
+        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_key   = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_value = nn.Linear(d_in, d_out, bias=qkv_bias)
+    # forward 同 v1，注意 nn.Linear 自带调用 x @ W.T</code></pre>
+
+  <p>两版输出不同——纯粹因为 <code>nn.Linear</code> 用了更讲究的初始化方案。书的练习 3.1 就是让你把 v2 的权重搬运进 v1 验证数学等价（提示：<code>nn.Linear</code> 以转置形式存权重）。</p>
+  <span class="cite">——《书》§3.4.2, pp.86–89（列表 3.1、3.2）</span>
+
+  <h2><span class="secno">§4</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "『查询』向量的职责是？",
+          "options": ["主动打听寻找相关", "展示标签等待匹配", "交付实际的信息内容", "记录词语的具体位置"],
+          "answer": 0,
+          "explain": "query 是搜索词：代表当前词想找什么。key 是索引标签，value 是实际内容。"
+        },
+        {
+          "q": "注意力分数在新版里如何计算？",
+          "options": ["查询与键的点积", "查询与值的点积", "键与值的点积", "输入向量的裸点积"],
+          "answer": 0,
+          "explain": "q·k 匹配（像搜索词撞索引），value 只在最后被加权取走，不参与打分。"
+        },
+        {
+          "q": "除以 √d_k 的目的是？",
+          "options": ["防止梯度趋于零", "让权重总和为一", "压缩词表的规模", "加速矩阵的乘法"],
+          "answer": 0,
+          "explain": "大维度下点积过大，softmax 退化为阶跃函数、梯度消失；缩放把分数拉回健康区间。"
+        },
+        {
+          "q": "缩放点积注意力中 d_k 指的是？",
+          "options": ["键的嵌入维度", "词表的条目总数", "序列的长度大小", "注意力头的个数"],
+          "answer": 0,
+          "explain": "d_k = keys.shape[-1]，即 q/k 投影后的维度。GPT-2 里是 768。"
+        },
+        {
+          "q": "权重参数与注意力权重的区别是？",
+          "options": ["前者固定后者动态", "前者动态后者固定", "两者完全相同的东西", "两者都随推理而变"],
+          "answer": 0,
+          "explain": "W_q/W_k/W_v 是训练优化的静态参数；α 是随每个输入动态计算的分数。"
+        },
+        {
+          "q": "SelfAttention v1 与 v2 输出不同的原因是？",
+          "options": ["权重初始化不同", "数学公式完全不同", "后者多了缩放操作", "前者没有使用偏置项"],
+          "answer": 0,
+          "explain": "nn.Parameter(torch.rand) vs nn.Linear 的精细初始化——数学上等价（练习 3.1 可验证）。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你能画出 q/k/v 数据流（x 三个投影 → q·k 打分 → /√d_k → softmax → 加权 v），并回答面试高频题"为什么要缩放"。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 6 课「因果掩码、Dropout 与多头注意力」</strong><br>
+    现在的注意力会"偷看未来"——预测第 3 个词时它能看到第 4 个词！下一课用上三角掩码堵住未来，用 dropout 抗过拟合，再把它复制成多头并行。第 3 章就此通关。对应书 §3.5–3.6。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    "q/k/v 我还是分不清" 是最高频的求助——把你的理解说给我听，我来帮你校准。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 5 课 · 主教材 §3.4 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch03" target="_blank">ch03</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

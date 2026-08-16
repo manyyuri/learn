@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 1 课 · 推理到底是什么 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 1 课 · 推理到底是什么</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM 第 1 章</span>
+    <span class="chip">⏱ 15–20 分钟</span>
+    <span class="chip">🎯 收获：一张能归位所有推理技术的地图</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么先学这个：</strong>你的目标是把推理技术用进工作。工作的第一个决策不是"怎么训练"，而是<strong>"这个任务到底要不要上推理模型、上哪种技术"</strong>。这一课给你判断的地图——学完你能把任何一种推理技术（论文里的、产品里的、同事嘴里说的）放进三个格子之一，并说清它贵在哪。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>推理的工程定义</h2>
+
+  <p>本书用的"推理"不是哲学定义，而是纯工程定义<span class="cite">BRM §1.1</span>：</p>
+
+  <div class="callout key">
+    <span class="co-label">定义</span>
+    <strong>推理 = 模型在给出最终答案之前，先生成中间步骤。</strong><br>
+    中间步骤可以展示给用户，也可以藏在 <code>&lt;think&gt;…&lt;/think&gt;</code> 标签里不可见。核心是一样的：把 token 花在中间解题上，而不是直接跳到结论。
+  </div>
+
+  <p>这种"中间步骤式生成"有个广为流传的名字：<span class="term">思维链</span>（chain-of-thought, CoT）——模型把思考过程一步步显式写出来<span class="cite">BRM §1.1</span>。同一个数学题，两种模型的差别长这样：</p>
+
+  <div class="figure">
+    <div class="vs">
+      <div class="panel plain">
+        <span class="panel-tag">常规 LLM（BRM fig 1.1）</span>
+        <b>问：</b>商店有 23 个苹果，上午卖了 17 个，下午又进了 12 个，现在有几个？<br><br>
+        <b>答：</b>18 个。<br><br>
+        <em>直接给结论。可能对，但你看不到过程，错了也不知道错在哪一步。</em>
+      </div>
+      <div class="panel fancy">
+        <span class="panel-tag">推理 LLM（BRM fig 1.2）</span>
+        <b>问：</b>同上<br><br>
+        <b>思考：</b>先算 23 − 17 = 6；再算 6 + 12 = 18。<br>
+        <b>答：</b>18 个。<br><br>
+        <em>把中间步骤写出来，多步任务准确率通常更高，过程可检查。</em>
+      </div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 常规模型 vs 推理模型回答同一问题。<span class="cite">BRM §1.1</span></div>
+  </div>
+
+  <div class="margin-note">
+    <span class="mn-label">⚠ 注意</span>"模型在思考"只是工程黑话。LLM 的"推理"和人类推理机制是否相同，是未解决的开放研究问题，本书刻意不碰。<span class="cite">BRM §1.1</span>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>它不是确定性逻辑，是"模拟"</h2>
+
+  <p>传统逻辑引擎（定理证明器）是<strong>确定性</strong>的：按固定规则走，同样的前提永远得到同样的结论，保证逻辑可靠。LLM 相反——它是<strong>自回归</strong>生成：一次预测一个 token，基于训练数据里的统计模式。所以它的"推理步骤"看起来头头是道，但<b>不保证逻辑正确</b><span class="cite">BRM §1.1</span>。</p>
+
+  <p>一个揭示本质的例子<span class="cite">BRM §1.4</span>：</p>
+
+  <blockquote style="border-left:3px solid var(--gold);margin:1.25rem 0;padding:0.35rem 1.1rem;font-style:italic">
+    "所有鸟都会飞。企鹅是鸟。企鹅会飞吗？"
+  </blockquote>
+
+  <ul>
+    <li><strong>封闭世界</strong>（只用题给前提）：有效推论是"会飞"——前提如此。</li>
+    <li><strong>开放世界</strong>（允许背景知识）："企鹅不会飞"与前提矛盾。一个好系统应该<b>察觉矛盾</b>并要求澄清。</li>
+  </ul>
+
+  <p>GPT-4o 这类非推理模型也能答对这道题，但靠的不是规则引擎——它只是无数次见过"企鹅→不会飞"这个统计关联，在<b>模拟</b>逻辑推理<span class="cite">BRM §1.5</span>。这种模式匹配式"推理"很强大，但在两种情况下会塌：</p>
+
+  <ol>
+    <li><strong>场景新</strong>——训练数据里没见过的逻辑结构；</li>
+    <li><strong>复杂度高</strong>——牵涉很多步的逻辑关系链。<span class="cite">BRM §1.5</span></li>
+  </ol>
+
+  <div class="margin-note">
+    <span class="mn-label">💡 冷知识</span>规则系统在 80–90 年代曾广泛用于医疗诊断、法律、航空，至今仍在需要透明决策的关键领域使用。它们输给 LLM 的不是准确性，而是<b>灵活性</b>：规则要人写，模式从数据里学。<span class="cite">BRM §1.4 侧栏</span>
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>三大流派：所有推理技术的地图</h2>
+
+  <p>2024 年 9 月 OpenAI 发布 <a href="https://openai.com/index/introducing-openai-o1-preview/">o1</a>（"花更多时间思考再回答"），2025 年 1 月 DeepSeek 开源 <a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1</a> 并公开训练方法——推理模型从此成为主线。本书把改进推理的所有方法归为三派<span class="cite">BRM §1.3</span>，它们都加在常规 LLM 管线之后：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">随机初始化<small>random weights</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">预训练<small>pre-training</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">指令微调<small>SFT</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">偏好微调<small>RLHF</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">+ 推理技术<small>下面三选一（或组合）</small></div>
+    </div>
+    <div class="fig-caption"><b>图 2</b> · 常规管线（你在上一本书里亲手做过）+ 推理增强层。<span class="cite">BRM fig 1.3/1.5</span></div>
+  </div>
+
+  <div class="map-grid">
+    <div class="bucket b1">
+      <h4>① 推理时算力扩展</h4>
+      <span class="b-weights">不改权重</span>。提示与采样层面下功夫：CoT 提示、多次采样投票、自我检查重写。用算力换性能。<br>
+      <span class="b-ch">→ ch4–5</span>
+    </div>
+    <div class="bucket b2">
+      <h4>② 强化学习（RL）</h4>
+      <span class="b-weights">改权重</span>。让模型的试错得到奖励信号（如"数学答案对不对"），从中学会更好的推理策略。<br>
+      <span class="b-ch">→ ch6–7</span>
+    </div>
+    <div class="bucket b3">
+      <h4>③ 蒸馏（distillation）</h4>
+      <span class="b-weights">改权重</span>。让大模型生成高质量推理轨迹，拿这些轨迹 SFT 一个小模型，把推理能力"搬"过去。<br>
+      <span class="b-ch">→ ch8</span>
+    </div>
+  </div>
+
+  <div class="callout note">
+    <span class="co-label">易混淆：RLHF ≠ 推理 RL</span>
+    两者都是强化学习，区别只在<b>奖励从哪来</b>：RLHF 用人类排序打分（对齐"人的偏好"）；推理 RL 用自动验证器，如答案对错、代码过不过测试（客观、可规模化）。后者有个名字：<b>RLVR</b>（Reinforcement Learning with Verifiable Rewards）。<span class="cite">BRM §1.3 侧栏</span>
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>工作视角：什么时候值得用</h2>
+
+  <p>推理模型不是免费午餐，它更贵有两个结构性原因<span class="cite">BRM §1.6</span>：</p>
+
+  <ul>
+    <li><strong>输出更长</strong>：LLM 逐 token 生成，每个 token 都要一次完整前向传播（forward pass）。答案长一倍，前向传播就多一倍。</li>
+    <li><strong>运行更多次</strong>：采样多个候选解、调用工具、跑验证器——一个任务要跑好几次模型。</li>
+  </ul>
+
+  <table>
+    <thead><tr><th>任务类型</th><th>上推理模型？</th></tr></thead>
+    <tbody>
+      <tr><td>多步数学、逻辑谜题、高难编码</td><td>✅ 推理模型的主场</td></tr>
+      <tr><td>Agent 的任务分解、规划、工具选择、从错误中恢复</td><td>✅ 推理让 agent 变得可用</td></tr>
+      <tr><td>摘要、翻译、知识型问答</td><td>❌ 普通模型足够，推理反而更贵更啰嗦</td></tr>
+    </tbody>
+  </table>
+
+  <div class="margin-note">
+    <span class="mn-label">📖 行业信号</span>OpenAI CEO（2025-02）："GPT-4.5 将是我们最后一个非思维链模型……下一个目标是让系统知道<b>什么时候该长时间思考、什么时候不用</b>。"<span class="cite">BRM §1.6</span>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>动手练习：把技术归位</h2>
+
+  <p>这是本课的核心练习——每条是一个真实技术做法，判断它属于哪个流派。<b>先别翻上文</b>，凭刚形成的直觉选：</p>
+
+  <div class="quiz" data-quiz="classify"></div>
+
+  <h2><span class="secno">06</span>检索练习：不看笔记答对几题</h2>
+
+  <p>合上笔记（关掉上文），下面 5 题检验这课是否真的存进去了：</p>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <!-- ==================== 收尾 ==================== -->
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>推理 = 先写中间步骤再给答案；一切改进手段分三派——不改权重的（推理时扩展）、用奖励改权重的（RL）、用教师模型的轨迹改权重的（蒸馏）。</strong>
+  </div>
+
+  <h2><span class="secno">07</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>读原书第 1 章</strong>（你有 PDF，约 20 页，1 小时内可读完）。读完这里的地图会自动立体起来。本课推荐的一手资料：<a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1 论文</a>的 Introduction——看真实 SOTA 推理模型如何用这三派组合拳。</p>
+    <p><span class="ns">🗂</span><strong>收藏<a href="../reference/glossary.html">术语表</a></strong>——以后每课的新术语都在那里积累，它是这门课的活字典。</p>
+    <p><span class="ns">⏭</span><strong>下一课预告</strong>：加载预训练小模型 + 手写生成循环（BRM ch2）。在你自己的 Mac 上，第一次亲手让一个 0.6B 模型逐 token 吐字。开课前请确认机器装好了 Python 3.10+ 环境。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>我是你的老师，随时可以问。</strong>任何没看懂的、想深挖的（比如"RLHF 具体怎么做奖励模型？"、"为什么 CoT 反而让某些任务变差？"），直接在对话里问，我会基于原书给你讲透，或者为它专门做一课。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="../reference/glossary.html">🗂 术语表</a>
+    <a class="nav-next" href="0002-load-model-and-generation-loop.html">第 2 课：加载模型与生成循环 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  classify: {
+    type: "classify",
+    title: "三流派分类练习",
+    instruction: "判断每条技术做法属于哪一派。选错可以再选，但一次归对才算掌握。",
+    buckets: ["推理时算力扩展", "强化学习", "蒸馏"],
+    items: [
+      {
+        text: "① 在提示词里加一句「请一步步思考再作答」",
+        bucket: 0,
+        why: "CoT 提示——纯提示工程，权重一个字节都没动。BRM ch4"
+      },
+      {
+        text: "② 同一道题采样 16 个答案，取出现最多的那个",
+        bucket: 0,
+        why: "self-consistency 投票——多次推理 + 统计，仍然不改权重。BRM ch4"
+      },
+      {
+        text: "③ 用「数学答案是否正确」作为奖励信号，更新模型权重",
+        bucket: 1,
+        why: "RLVR 式强化学习——自动验证的奖励 + 权重更新。BRM ch6–7"
+      },
+      {
+        text: "④ 用 DeepSeek-R1 生成的 10 万条推理轨迹微调一个 0.6B 小模型",
+        bucket: 2,
+        why: "蒸馏——教师模型生成轨迹，学生模型 SFT。BRM ch8"
+      },
+      {
+        text: "⑤ 模型答完后自我检查，发现错误，重写答案再来一遍",
+        bucket: 0,
+        why: "self-refinement——推理时的迭代改进，不动权重。BRM ch5"
+      }
+    ]
+  },
+  mc: {
+    type: "mc",
+    title: "检索练习",
+    questions: [
+      {
+        question: "在 LLM 语境下，「推理」的工程定义是什么？",
+        options: [
+          "生成最终答案后再补解释文本",
+          "训练阶段用人类反馈对齐偏好",
+          "生成中间步骤后再给最终答案",
+          "推理阶段检索外部知识库增强"
+        ],
+        answer: 2,
+        explain: "BRM §1.1：先生成中间步骤（可见或藏于 <think> 标签），再给最终答案。B 是偏好微调，D 是 RAG——都不是本书说的推理。"
+      },
+      {
+        question: "三大流派中，哪一类完全不修改模型权重？",
+        options: [
+          "强化学习训练",
+          "推理时算力扩展",
+          "知识蒸馏微调",
+          "偏好对齐训练"
+        ],
+        answer: 1,
+        explain: "BRM §1.3：推理时算力扩展（CoT 提示、采样投票、self-refinement）用算力换性能，不动权重。RL 和蒸馏都要改权重。"
+      },
+      {
+        question: "GPT-4o 答对「企鹅会不会飞」主要靠什么？",
+        options: [
+          "显式逻辑规则引擎",
+          "外挂的知识库检索",
+          "人类反馈实时修正",
+          "数据里的统计关联"
+        ],
+        answer: 3,
+        explain: "BRM §1.5：它没有在跑规则引擎，只是训练数据里见过大量「企鹅→不会飞」，在模拟逻辑推理。场景新或链路长时就会露馅。"
+      },
+      {
+        question: "推理模型单次任务更贵的两个结构性原因是？",
+        options: [
+          "输出更长且多次运行",
+          "参数更多且精度更低",
+          "显存占用且缓存失效",
+          "量化误差且重试更多"
+        ],
+        answer: 0,
+        explain: "BRM §1.6：① 中间步骤让输出更长→更多次前向传播；② 采样多解/调工具/跑验证器→同一任务多次运行。答案 B/C/D 都不是结构性原因。"
+      },
+      {
+        question: "DeepSeek-R1 式推理训练中，奖励信号主要来自哪里？",
+        options: [
+          "人类评估员排序打分",
+          "教师模型的输出概率",
+          "自动验证器判定对错",
+          "用户点击行为的反馈"
+        ],
+        answer: 2,
+        explain: "BRM §1.3：推理 RL 用 RLVR——可自动验证的奖励（数学答案对错、代码通过测试）。A 是 RLHF 的做法。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

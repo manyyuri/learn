@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 9 课 · Log-prob 置信度 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 9 课 · 给答案打分：从规则分数到 log-prob 置信度</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §5.3–5.6</span>
+    <span class="chip">⏱ 35–45 分钟</span>
+    <span class="chip">🎯 收获：logprob 打分——它还会在 GRPO 训练目标里再登场</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>投票需要并列裁决，self-refinement 需要判断"改完是不是更好"——都需要<b>给答案打分</b>。而且这课的 log-prob 概念是全书最"保值"的知识之一：下一章 RL 训练目标的核心就是它。工作上，你 API 返回的 logprobs 字段从此可解释、可利用。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>打分器 ≠ 验证器</h2>
+
+  <p>先分清两个东西<span class="cite">BRM §5.3</span>：</p>
+  <table>
+    <thead><tr><th></th><th>验证器（ch3）</th><th>打分器（本课）</th></tr></thead>
+    <tbody>
+      <tr><td>前提</td><td>已知标准答案</td><td><b>不知道正确答案</b></td></tr>
+      <tr><td>用途</td><td>评估集上算准确率</td><td>给候选答案排序/裁决</td></tr>
+    </tbody>
+  </table>
+
+  <p>三种打分器路线<span class="cite">BRM §5.3</span>：<b>启发式规则</b>（本课）→ <b>模型自身概率</b>（本课）→ <b>LLM-as-a-judge</b>（附录 F.5）。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>路线一：启发式分数</h2>
+
+  <p>两个正确答案（都算出 83），一个 534 tokens、一个 231 tokens——谁更好？书里的规则打分<span class="cite">BRM §5.3, listing 5.3</span>：</p>
+
+<pre><code>def heuristic_score(answer, prompt=None, brevity_bonus=500.0, ...):
+    score = 0.0
+    cand = extract_final_candidate(answer, fallback="none")
+    if cand:
+        score += 2.0        # boxed_bonus：干净的可抽取答案
+    else:
+        cand = extract_final_candidate(answer, fallback="number_only")
+        if cand:
+            score += 1.0    # extract_bonus：至少有个数字
+    score += 1.5 * math.exp(-len(answer) / brevity_bonus)  # 简短奖励，指数衰减
+    return score</code></pre>
+
+  <ul>
+    <li><b>抽取奖励</b>：有 \boxed{} 得 2.0 &gt; 只有裸数字得 1.0 &gt; 长文本 0 分——鼓励"能提取最终答案"的格式。</li>
+    <li><b>简短奖励</b>：随长度指数衰减，短答案最多 +1.5，超过 1000 字符只加 0.2 以下——只做 tie-break，不喧宾夺主。</li>
+  </ul>
+  <p>实测：长答案 2.088，短答案 <b>2.517</b>——选短的<span class="cite">BRM §5.3</span>。参数值不神圣，相对比例才重要；怎么调看副作用（总偏好无法解析的 → 加抽取分；偏好啰嗦的 → 加简短压力）。</p>
+
+  <div class="callout note">
+    <span class="co-label">工作联想</span>这个 heuristic_score 就是 ch7 将要实现的 <b>format reward</b> 的雏形——格式奖励进 GRPO，同款思想：奖励"答案好抽取、别啰嗦"。
+  </div>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>路线二：模型自己有多自信？</h2>
+
+  <p>关键转向：不生成，只<b>审读分数</b>。把 prompt+答案整体喂给模型，在每个位置查"模型给『实际下一个 token』分配的概率"<span class="cite">BRM §5.4</span>：</p>
+
+<pre><code>@torch.inference_mode()
+def calc_next_token_probas(model, tokenizer, prompt, device):
+    token_ids = torch.tensor(tokenizer.encode(prompt), device=device)
+    logits = model(token_ids.unsqueeze(0)).squeeze(0)      # [seq_len, vocab]
+    all_probas = torch.softmax(logits, dim=-1)
+    t_idx = torch.arange(0, token_ids.shape[0] - 1)        # 每个位置
+    next_ids = token_ids[1:]                                # 真实下一 token（错位一格）
+    next_token_probas = all_probas[t_idx, next_ids]         # 查表
+    joint = torch.prod(next_token_probas)                   # 联合概率 = 连乘
+    return next_token_probas, joint</code></pre>
+
+  <p>书例（"The capital of Germany is __"）<span class="cite">BRM §5.4</span>：</p>
+  <table>
+    <thead><tr><th>序列</th><th>最后 token 概率</th><th>联合概率（连乘）</th></tr></thead>
+    <tbody>
+      <tr><td>… is <b>Berlin</b></td><td>0.169</td><td>5.9e-08</td></tr>
+      <tr><td>… is <b>Bridge</b></td><td>2.9e-07</td><td><b>1.0e-13</b></td></tr>
+    </tbody>
+  </table>
+
+  <p>问题立刻暴露：联合概率是<b>一堆小于 1 的数连乘</b>，越长越接近 0——长序列直接数值下溢（underflow）。</p>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>Log 变换：连乘变连加</h2>
+
+  <p>解法是统计学习的看家本领<span class="cite">BRM §5.5</span>：</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">联合概率<small>p₁ · p₂ · ⋯ · p_T</small></div>
+      <div class="arrow">—log→</div>
+      <div class="stage hl">联合 logprob<small>log p₁ + log p₂ + ⋯ + log p_T</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · log 把乘法变加法：既避免下溢，又保序（likelihood 大 ⇔ log-likelihood 大，只是更不"负"）。</div>
+  </div>
+
+  <p>上例换算：Berlin <b>−16.63</b> vs Bridge <b>−29.88</b>——差距清晰可读。代码只改两处：`softmax`→`log_softmax`，`prod`→`sum`<span class="cite">BRM §5.5, listing 5.7</span>。<b>logprob 越接近 0 越自信</b>（0 = 概率 1）。</p>
+
+  <p>做成打分器还要两步修正<span class="cite">BRM §5.6, listing 5.8</span>：① <b>只算答案 token</b>，排除 prompt（prompt 是你自己写的，不该计入模型的自信）；② <b>取平均不取总和</b>——否则长答案天然吃亏。</p>
+
+<pre><code>@torch.inference_mode()
+def avg_logprob_answer(model, tokenizer, prompt, answer, device="cpu"):
+    prompt_ids = tokenizer.encode(prompt)
+    answer_ids = tokenizer.encode(answer)
+    full_ids = torch.tensor(prompt_ids + answer_ids, device=device)
+    logits = model(full_ids.unsqueeze(0)).squeeze(0)
+    logprobs = torch.log_softmax(logits, dim=-1)
+    start = len(prompt_ids) - 1                          # 只取答案段
+    end = full_ids.shape[0] - 1
+    t_idx = torch.arange(start, end, device=device)
+    next_tokens = full_ids[start + 1 : end + 1]
+    return torch.mean(logprobs[t_idx, next_tokens])      # 长度归一化：平均</code></pre>
+
+  <p>书例：Berlin 答案 <b>−0.204</b> vs Bridge 答案 <b>−3.891</b><span class="cite">BRM §5.6</span>。</p>
+
+  <div class="callout warn">
+    <span class="co-label">⚠ 置信 ≠ 正确</span>logprob 度量的是"模型自己多偏好这个答案"，不是"答案多正确"。模型会<b>自信地犯错</b>——流畅、常见、格式漂亮的错误答案可能拿高分（下一课实测：avg logprob 打分器整体表现最差）。它是"若干有用信号之一"，不是万能裁决器。<span class="cite">BRM §5.4/5.6</span>
+  </div>
+
+  <div class="margin-note">
+    <span class="mn-label">埋个伏笔</span>logprob 在 ch6 强势回归：RLVR/GRPO 的策略梯度就是在"提升高奖励回答的 log-prob、压低低奖励回答的 log-prob"。这课是地基。<span class="cite">BRM §5.6</span>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>打分 = 在不知答案时排序候选：启发式看格式与长度，logprob 看模型自身置信（答案段平均 log-softmax）。log 化乘为加、避免下溢；但置信不等于正确。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0010-self-refinement.html">Self-refinement 自我修正</a>——草稿 → 批评 → 修订的循环，用本课的打分器决定"接不接受修改"。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：log/prob 数值想亲手算一遍、或"API 里的 logprobs 怎么用到我的业务"都行。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0008-self-consistency.html">← 第 8 课</a>
+    <a class="nav-next" href="0010-self-refinement.html">第 10 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 9 课检索练习",
+    questions: [
+      {
+        question: "打分器与第 3 课验证器的本质区别是？",
+        options: ["打分器精度更加高", "打分器不知道正确答案", "验证器无法用于数学", "打分器必须用 GPU"],
+        answer: 1,
+        explain: "BRM §5.3：验证器在「已知答案」的评估集上判对错；打分器在「不知道答案」时给候选排序/裁决。"
+      },
+      {
+        question: "heuristic_score 中简短奖励为什么用指数衰减而非固定扣分？",
+        options: ["指数计算更加快速", "防止压过格式奖励只做微调", "让分数恒为正数", "避免答案为空字符串"],
+        answer: 1,
+        explain: "BRM §5.3：该项最多 1.5 分、随长度指数衰减——主要帮同质量答案间破平，不主导总分。"
+      },
+      {
+        question: "联合概率连乘的主要数值问题是什么？",
+        options: ["结果超出整数范围", "小于 1 的数连乘趋零下溢", "计算速度过于缓慢", "概率可能变成负数"],
+        answer: 1,
+        explain: "BRM §5.4–5.5：5 token 就乘到 1e-13；再长会被计算机舍入成 0，信息丢失。"
+      },
+      {
+        question: "avg_logprob_answer 的两处关键修正是什么？",
+        options: ["用最大值和加温度", "排除 prompt 并取平均", "乘以长度并取总和", "过滤低分并重采样"],
+        answer: 1,
+        explain: "BRM §5.6：① 只算答案 token（prompt 不计入模型自信）；② 平均代替求和（长度归一化，公平比较长短答案）。"
+      },
+      {
+        question: "logprob 打分的主要风险是什么？",
+        options: ["计算量太大跑不动", "数值不稳定易下溢", "把流畅但错误的答案打高分", "只对数学答案有效"],
+        answer: 2,
+        explain: "BRM §5.6：它度量模型自身偏好而非正确性——「自信的失误」（fluent, familiar, clean but wrong）会得高分。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

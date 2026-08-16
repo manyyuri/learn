@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPT 架构速查 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Reference · 架构速查表</p>
+  <h1>GPT-2 124M：一页看懂</h1>
+  <p class="subtitle">配置字典、逐层数据流、张量形状、参数账本。对应书第 4 章（pp.108–149）。</p>
+
+  <h2>一、配置字典</h2>
+<pre><code class="language-python">GPT_CONFIG_124M = {
+    "vocab_size": 50257,    # BPE 词表（第3课）
+    "context_length": 1024, # 上下文窗口 = 位置嵌入行数
+    "emb_dim": 768,         # 嵌入维度
+    "n_heads": 12,          # 注意力头数（768÷12=64 维/头）
+    "n_layers": 12,         # Transformer 块数
+    "drop_rate": 0.1,       # dropout（推理时关闭）
+    "qkv_bias": False,      # 现代规范不用；加载 OpenAI 权重时改 True
+}</code></pre>
+
+  <h2>二、GPT-2 家族（同一架构，不同规模）</h2>
+  <table>
+    <tr><th>模型</th><th>emb_dim</th><th>层数</th><th>头数</th><th>参数（权重绑定后）</th></tr>
+    <tr><td>small（本书主角）</td><td>768</td><td>12</td><td>12</td><td>124M</td></tr>
+    <tr><td>medium（指令微调用）</td><td>1024</td><td>24</td><td>16</td><td>355M</td></tr>
+    <tr><td>large</td><td>1280</td><td>36</td><td>20</td><td>774M</td></tr>
+    <tr><td>XL</td><td>1600</td><td>48</td><td>25</td><td>1558M</td></tr>
+  </table>
+  <p class="cite">——《书》§4.6 / §5.4</p>
+
+  <h2>三、前向数据流（含张量形状）</h2>
+  <p>以 batch=2、序列长 T=4 为例：</p>
+<pre><code>输入 token IDs                [2, 4]
+  │ tok_emb 查表               → [2, 4, 768]     (词嵌入)
+  │ pos_emb 查表 (0..T-1)      → [2, 4, 768]     (位置嵌入)
+  │ x = tok + pos              → [2, 4, 768]
+  │ dropout(0.1)
+  ├─ ×12 TransformerBlock（形状全程不变）
+  │    │ LayerNorm(dim=-1)                     每 token 768 维归一化
+  │    │ MultiHeadAttention: QKV 投影→拆12头→缩放点积(√64)→因果掩码→拼回→out_proj
+  │    │ x = x + attn(x)                       残差 1
+  │    │ LayerNorm
+  │    │ FeedForward: 768 → 3072 → GELU → 768  扩4倍再压回
+  │    │ x = x + ffn(x)                        残差 2
+  │ final LayerNorm            → [2, 4, 768]
+  └ out_head: Linear(768→50257) → [2, 4, 50257] logits（每位置对全词表打分）</code></pre>
+
+  <h2>四、参数账本</h2>
+  <table>
+    <tr><th>部件</th><th>形状</th><th>参数量</th></tr>
+    <tr><td>tok_emb</td><td>[50257, 768]</td><td>38.6M</td></tr>
+    <tr><td>pos_emb</td><td>[1024, 768]</td><td>0.79M</td></tr>
+    <tr><td>每块注意力（W_q/k/v/out 各）</td><td>[768, 768] ×4</td><td>2.36M × 12 块</td></tr>
+    <tr><td>每块 FFN</td><td>768×3072 + 3072×768</td><td>4.72M × 12 块</td></tr>
+    <tr><td>out_head（无权重绑定时）</td><td>[50257, 768]</td><td>38.6M</td></tr>
+    <tr><td><b>合计</b></td><td></td><td><b>163,009,536</b></td></tr>
+    <tr><td><b>权重绑定后</b>（out_head 复用 tok_emb）</td><td></td><td><b>124,412,160</b></td></tr>
+  </table>
+  <p>内存：163M × 4 字节（float32）= <b>621.83 MB</b>。</p>
+  <p class="cite">——《书》§4.6, pp.139–141</p>
+
+  <h2>五、生成循环（自回归）</h2>
+<pre><code class="language-python">for _ in range(max_new_tokens):
+    idx_cond = idx[:, -context_size:]           # 超长只留最后 1024
+    logits = model(idx_cond)
+    probs  = softmax(logits[:, -1, :] / T)      # 最后一个位置 = 下一词预测
+    # 可选 top-k：低于第 k 大的 logits → -inf
+    next_idx = multinomial(probs, 1)            # 或 argmax（贪心 / T→0）
+    idx = cat((idx, next_idx), dim=1)           # 拼回 → 下一轮</code></pre>
+
+  <p style="margin-top:2em"><a href="../lessons/index.html">← 返回课程导航</a> · <a href="glossary.html">术语表</a></p>
+
+  <footer>
+    <p>Build a LLM From Scratch · 参考文档 · 依据主教材第 4–5 章与官方 ch04/ch05 代码整理</p>
+  </footer>
+</main>
+</body>
+</html>

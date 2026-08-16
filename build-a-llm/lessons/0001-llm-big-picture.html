@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 1 课 · LLM 全景图</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 1 课 · Build a LLM From Scratch · 对应书第 1 章</p>
+  <h1>LLM 全景图：ChatGPT 是怎么来的</h1>
+  <p class="subtitle">读完这一课，你能向任何人讲清楚 ChatGPT 从无到有的完整路径——这是后面亲手实现它的地图。</p>
+
+  <p>你的任务有三个：搞懂原理、亲手构建、支撑工作。这一课先解决第一件事的<b>地基</b>：整张地图。以后每一课实现一个零件时，你都知道它装在地图的哪个位置。面试时被问"ChatGPT 的原理是什么"，答案就是这一课。</p>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>什么是 LLM</h2>
+  <p><span class="term">大型语言模型<span class="en">（LLM, Large Language Model）</span></span>是一种深度神经网络，在海量文本上训练，用来理解和生成人类语言。"深度神经网络"你可以先想象成一个<b>带几亿个可调旋钮的巨大函数</b>：输入文字，输出文字。训练，就是用数据自动调好这些旋钮——这些旋钮的专业名字叫<span class="term">参数<span class="en">（parameters）</span></span>。</p>
+  <span class="cite">——《书》§1.1, p.13</span>
+
+  <div class="sidenote">为什么要亲手造一个，而不是直接调 API？书 §1.3 给了四个理由：真正理解机制与局限；能针对自己领域做定制（如 BloombergGPT 之于金融）；数据隐私不必外传第三方；可部署到本地设备，省下服务器成本、降低延迟。这正对应你任务里的 b 和 c。</div>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>一切的起点：预测下一个词</h2>
+  <p>GPT 类模型的全部本领，来自一个简单到令人怀疑的任务——<span class="term">下一个词预测<span class="en">（next-token prediction）</span></span>：给一段文字，猜下一个词。</p>
+  <p>比如：<i>"人生苦短，我用___"</i>。模型猜出"Python"的概率应该最高。海量文本里藏着亿万道这样的"填空题"，模型一道道做下来，就把语法、语义、事实知识统统学会了。</p>
+  <p>关键问题：这亿万道题的<b>标签</b>（正确答案）从哪来？答案：不需要人工标注。原文的下一个词<b>天然就是标签</b>。这种"数据自己给自己当标签"的方式叫<span class="term">自监督学习<span class="en">（self-supervised learning）</span></span>——它就是 LLM 能吃下整个互联网规模文本的根本原因。</p>
+  <span class="cite">——《书》§1.6, pp.23–24</span>
+
+  <div class="sidenote">只训练过"预测下一个词"的 GPT，却能翻译、能分类、能写代码——这些没教过的能力叫<span class="term">涌现行为<span class="en">（emergent behavior）</span></span>（书 §1.6, p.25）。面试里这是个高频加分题。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>从基础模型到 ChatGPT：两阶段训练</h2>
+  <p>现代 LLM 的诞生分两大步：</p>
+  <p><b>第一步：预训练<span class="en">（pretraining）</span></b>。在海量<b>未标注</b>的原始文本上做下一个词预测，得到一个通用的<span class="term">基础模型<span class="en">（foundation model）</span></span>——GPT-3 就是这样的基础模型，它能补全句子，但还不太听人话。</p>
+  <p><b>第二步：微调<span class="en">（finetuning）</span></b>。在较小的<b>有标注</b>数据上继续训练，把基础模型改造成特定用途。两条主流路线：<span class="term">分类微调<span class="en">（classification finetuning）</span></span>——标签是类别，如"垃圾/非垃圾邮件"；<span class="term">指令微调<span class="en">（instruction finetuning）</span></span>——标签是"指令 + 期望回答"。ChatGPT 的原始模型，就是 GPT-3 经过大规模指令微调、再用人类反馈对齐（RLHF）打磨出来的。</p>
+  <span class="cite">——《书》§1.3, pp.16–18 及 §1.6, p.23 · <a href="https://arxiv.org/abs/2203.02155" target="_blank">InstructGPT 论文</a></span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 造一个 ChatGPT",
+      "intro": "把 ChatGPT 的诞生过程按正确顺序点出来（点错会抖动提醒）",
+      "items": [
+        "在海量未标注文本上预训练（下一个词预测）",
+        "得到基础模型（如 GPT-3）",
+        "在指令-回答对数据上监督微调",
+        "用人类反馈对齐（RLHF）",
+        "得到对话助手（如 ChatGPT）"
+      ],
+      "success": "正确！这张流水线请刻进脑子里。",
+      "explain": "未标注文本 → 自监督预训练 → 基础模型 → 有标注指令数据 → 监督微调 → RLHF 对齐 → 助手。书 §1.3 把前两步称为『两阶段训练』；本书第 5 章实现预训练，第 7 章实现指令微调；RLHF 超出书的主线，属于 InstructGPT 的扩展。"
+    }
+    </script>
+  </div>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>Transformer 家族：三大流派</h2>
+  <p>现代 LLM 几乎都基于 <span class="term">Transformer<span class="en">（Transformer）</span></span>架构——2017 年谷歌论文《Attention Is All You Need》为机器翻译设计的模型。它由两部分组成：<span class="term">编码器<span class="en">（encoder）</span></span>负责"读懂"输入文本，压成一串向量表示；<span class="term">解码器<span class="en">（decoder）</span></span>负责"写出"输出文本，逐词生成。</p>
+  <p>后来的模型各自继承了一半或全部，形成三大流派：</p>
+
+  <table>
+    <tr><th>流派</th><th>继承了什么</th><th>预训练任务</th><th>擅长</th><th>代表</th></tr>
+    <tr><td>仅编码器<span class="en">（encoder-only）</span></td><td>编码器</td><td>掩码词预测（完形填空）</td><td>文本分类、理解</td><td>BERT</td></tr>
+    <tr><td><b>仅解码器<span class="en">（decoder-only）</span></b></td><td><b>解码器</b></td><td><b>下一个词预测</b></td><td><b>文本生成</b></td><td><b>GPT 系列</b></td></tr>
+    <tr><td>编码-解码<span class="en">（encoder-decoder）</span></td><td>两者都要</td><td>翻译式序列转换</td><td>翻译、摘要</td><td>原始 Transformer、T5</td></tr>
+  </table>
+  <span class="cite">——《书》§1.4, pp.18–21 · <a href="https://arxiv.org/abs/1706.03762" target="_blank">Attention Is All You Need, arXiv:1706.03762</a></span>
+
+  <div class="sidenote">别把两个词划等号：不是所有 Transformer 都是 LLM（它也能做计算机视觉），也不是所有 LLM 都是 Transformer（还有循环/卷积路线的挑战者）。书 §1.4 侧栏（p.21）专门提醒了这一点。</div>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>GPT 解剖图：只留解码器</h2>
+  <p>把 Transformer 的编码器整个扔掉，只留解码器并加以放大——就是 GPT（Generative Pretrained Transformer）。它<b>单向从左到右</b>看文本，天然适合"逐词生成"：每写一个词，就把它拼回输入末尾，再预测下一个。这种"吃自己的输出"的生成方式叫<span class="term">自回归<span class="en">（autoregressive）</span></span>。</p>
+  <span class="cite">——《书》§1.6, pp.23–25</span>
+
+  <div class="flow">
+    <div class="node">输入文本<small>如 "人生苦短，我用"</small></div>
+    <div class="arrow">↓ <small>分词 tokenize</small></div>
+    <div class="node hot">token ID 序列<small>每个词元对应词表里的编号 · 第 2 章</small></div>
+    <div class="arrow">↓ <small>向量化 embed</small></div>
+    <div class="node hot">词嵌入 + 位置编码<small>把编号变成带位置信息的向量 · 第 2 章</small></div>
+    <div class="arrow">↓ <small>堆叠 ×N</small></div>
+    <div class="node stack">Transformer 块<span class="badge">× N 层</span><small>掩码自注意力 + 前馈网络 · 第 3–4 章</small></div>
+    <div class="arrow">↓ <small>打分</small></div>
+    <div class="node hot">logits → 采样下一个 token<small>给词表里每个词元打分 · 第 4 章</small></div>
+    <div class="loopback">↺ 把新 token 拼回输入，重复直到生成结束 —— 自回归循环</div>
+  </div>
+
+  <p>规模感受一下：原始 Transformer 是 6 层编码器 + 6 层解码器；GPT-3 是 <b>96 层、1750 亿参数</b>，预训练成本估计 460 万美元（书 §1.6, p.25 及 §1.5, p.23）。我们当然训不起 GPT-3——本书实现的是 GPT-2 小杯（124M 参数，1.24 亿），并学习加载 OpenAI 公开的 GPT-2 权重，相当于站在巨人肩膀上继续微调。</p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>我们的完整路线图</h2>
+  <p>全书分三个阶段（图 1.9），对应书的第 2–7 章。这张表就是接下来 16 节课的导航：</p>
+
+  <table>
+    <tr><th>阶段</th><th>做什么</th><th>书</th><th>产出</th></tr>
+    <tr><td><b>① 架构与数据</b></td><td>分词 → 注意力 → 搭出完整 GPT</td><td>第 2–4 章</td><td>能生成文本的 GPT 模型代码</td></tr>
+    <tr><td><b>② 预训练</b></td><td>损失函数、训练循环、加载 GPT-2 权重</td><td>第 5 章</td><td>训好的基础模型</td></tr>
+    <tr><td><b>③ 微调</b></td><td>垃圾邮件分类器 + 指令微调出小助手</td><td>第 6–7 章</td><td>实用模型</td></tr>
+  </table>
+  <span class="cite">——《书》§1.7, pp.25–26</span>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>检索练习：检验地图是否刻进脑子</h2>
+  <p>先别往上翻——<b>凭记忆作答</b>才有效。答错不要紧，错哪儿补哪儿，这正是练习的意义。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 7 题，即时反馈。选项顺序随机，不看运气看实力。",
+      "questions": [
+        {
+          "q": "预训练阶段使用的训练数据是什么？",
+          "options": ["海量未标注的原始文本", "人工标注的指令回答对", "清洗整理的多轮对话集", "人工筛选的图片说明集"],
+          "answer": 0,
+          "explain": "预训练用『原始文本』（raw text）——无人工标签，标签由『下一个词』自动生成，即自监督学习。"
+        },
+        {
+          "q": "『用下一个词充当标签』属于哪种学习范式？",
+          "options": ["自监督学习范式", "有监督学习范式", "无监督学习范式", "强化学习式训练"],
+          "answer": 0,
+          "explain": "自监督：不需人工标注，数据自身的结构（下一个词）就是标签。有监督需要人工标签；无监督没有预测目标。"
+        },
+        {
+          "q": "基础模型（foundation model）产生于哪个阶段之后？",
+          "options": ["海量原始文本预训练后", "指令数据微调完成之后", "人类反馈对齐完成之后", "多轮对话训练完成之后"],
+          "answer": 0,
+          "explain": "预训练的直接产物就是基础模型（如 GPT-3）；指令微调和对齐是之后对基础模型的深加工。"
+        },
+        {
+          "q": "ChatGPT 的原始模型相对 GPT-3 主要多了什么？",
+          "options": ["指令微调与对齐", "更大的参数规模", "换用更新的架构", "更多的训练轮次"],
+          "answer": 0,
+          "explain": "架构没换、参数没大增：是在 GPT-3 基础上做大规模指令微调 + 人类反馈对齐（InstructGPT 方法，arXiv:2203.02155）。"
+        },
+        {
+          "q": "GPT 把生成的词拼回输入再继续预测，这类模型称为？",
+          "options": ["自回归式的模型", "自编码式的模型", "双塔检索式模型"],
+          "answer": 0,
+          "explain": "自回归（autoregressive）：以自己的历史输出为输入继续生成。『自编码』对应 BERT 的掩码词预测路线。"
+        },
+        {
+          "q": "GPT 采用哪种 Transformer 架构？",
+          "options": ["仅用解码器的架构", "仅用编码器的架构", "编码解码混合架构"],
+          "answer": 0,
+          "explain": "GPT = decoder-only，单向从左到右，适合逐词生成。BERT 是 encoder-only，原始 Transformer 两者兼备。"
+        },
+        {
+          "q": "原始 Transformer（2017）最初设计来做什么任务？",
+          "options": ["英语到德语翻译", "电子邮件的分类", "文章摘要的生成", "计算机代码生成"],
+          "answer": 0,
+          "explain": "原始 Transformer 为机器翻译而生（英→德/法）。翻译、摘要等后来被证明 GPT 也能做——这正是涌现行为。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你现在能不看任何资料，回答这三个面试级问题——① ChatGPT 的两阶段训练是什么？② GPT、BERT、原始 Transformer 各继承了 Transformer 的哪部分？③ 为什么 LLM 的预训练不需要人工标注？</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 2 课「分词：文字如何变成数字」</strong><br>
+    LLM 只认数字不认文字。下一课我们把文字拆成 token、编成 ID，并认识两个特殊角色 <code>&lt;|unk|&gt;</code>（未知词）和 <code>&lt;|endoftext|&gt;</code>（文本分隔符）——对应书 §2.1–2.4。届时会正式动手写第一段 Python 代码。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    本课任何地方卡住——比如"RLHF 到底怎么用人类反馈"、"为什么 decoder-only 赢了"——直接回到对话里问我。我是你的私人讲师，没有傻问题。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 1 课 · 主教材：<a href="https://www.manning.com/books/build-a-large-language-model-from-scratch">Build a Large Language Model (From Scratch)</a>（Sebastian Raschka）· <a href="../reference/glossary.html">术语表</a> · <a href="https://github.com/rasbt/LLMs-from-scratch" target="_blank">官方代码库</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

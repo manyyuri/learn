@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 10 课 · 自回归生成</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 10 课 · Build a LLM From Scratch · 对应书 §4.7</p>
+  <h1>自回归生成：让 GPT 开口说话</h1>
+  <p class="subtitle">十几行代码实现生成循环——你会发现模型此刻满口胡话，而这正是下一章预训练的全部动机。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：总装完成后的三连问",
+      "questions": [
+        {
+          "q": "GPTModel 输出的 logits 形状是？",
+          "options": ["批次乘长度乘词表", "长度乘批次乘词表", "词表乘长度乘批次", "批次乘词表乘维度"],
+          "answer": 0,
+          "explain": "[b, T, 50257]：每个位置对全词表打分。"
+        },
+        {
+          "q": "TransformerBlock 采用的归一化风格是？",
+          "options": ["前置层归一化", "后置层归一化", "双重层归一化", "无归一化直连"],
+          "answer": 0,
+          "explain": "Pre-LayerNorm：norm 在子层之前，比原始 Transformer 的 Post-LN 训练更稳。"
+        },
+        {
+          "q": "权重绑定把哪两层共用一个矩阵？",
+          "options": ["嵌入层与输出头", "输入头与嵌入层", "两个嵌入层共用", "两个归一化层共用"],
+          "answer": 0,
+          "explain": "tok_emb 和 out_head 都是 [50257, 768]，GPT-2 让它们共享，163M → 124M。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>生成循环：预测 → 拼接 → 重复</h2>
+  <p>回忆第 1 课的"自回归"：每生成一个词，就把它拼回输入末尾，再预测下一个。代码（书列表 4.8）：</p>
+
+<pre><code class="language-python">def generate_text_simple(model, idx, max_new_tokens, context_size):
+    for _ in range(max_new_tokens):                      # 生成 max_new_tokens 个新 token
+        idx_cond = idx if idx.size(1) <= context_size \
+                       else idx[:, -context_size:]       # ① 上下文超长则只留最后 1024 个
+
+        logits = model(idx_cond)                         # ② 前向：[b, T, 50257]
+
+        probs    = torch.softmax(logits[:, -1, :], dim=-1)  # ③ 只取最后一个位置 → 概率
+        next_idx = torch.argmax(probs, dim=-1, keepdim=True) # ④ 贪心：挑最大概率的 token
+
+        idx = torch.cat((idx, next_idx), dim=1)          # ⑤ 拼回输入 → 下一轮
+    return idx</code></pre>
+
+  <p>五步循环中藏着一个细节：<code>logits[:, -1, :]</code> ——我们只关心<b>最后一个位置</b>的预测。因为因果掩码（第 6 课）保证了最后一个位置"看完了"全部上文，它的 logits 就是对"下一个词"的判断。</p>
+  <span class="cite">——《书》§4.7, pp.141–145（列表 4.8，图 4.17–4.18）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>贪心解码：永远选最稳的词</h2>
+  <p><code>argmax</code> 选最大概率 = <span class="term">贪心解码<span class="en">（greedy decoding）</span></span>。书里特意指出：softmax 是单调函数，不改变大小顺序，所以 argmax(probs) 与 argmax(logits) 结果相同——softmax 这步纯粹是为了教学直觉（书 §4.7, p.146）。贪心解码<b>确定、保守、有点无聊</b>：同一输入永远同一输出，且容易陷入重复。第 11 课会见到它的升级版：temperature 缩放与 top-k 采样，让生成有"创造力"。</p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>亲手试跑：胡言乱语的模型</h2>
+
+<pre><code class="language-python">model.eval()   # 关闭 dropout 等训练期组件（推理模式）
+
+start_context = "Hello, I am"
+encoded  = tokenizer.encode(start_context)
+encoded_tensor = torch.tensor(encoded).unsqueeze(0)      # [1, 4]：加 batch 维
+
+out = generate_text_simple(model, encoded_tensor,
+                           max_new_tokens=6,
+                           context_size=1024)
+print(tokenizer.decode(out.squeeze(0).tolist()))
+# → "Hello, I am Featureiman Byeswickattribute argue"</code></pre>
+
+  <p><b>Featureiman Byeswickattribute argue</b>——书里的著名输出。架构完全正确，但权重还是随机初始化的：模型还不知道任何语言规律。<b>让它学会说话 = 第 5 章（预训练）的全部内容</b>，也是下一课的主题。</p>
+  <span class="cite">——《书》§4.7, pp.146–148</span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 生成循环五步",
+      "intro": "把 generate_text_simple 每轮迭代的步骤排序",
+      "items": [
+        "裁剪上下文：超过 1024 只留最后 1024 个 token",
+        "前向传播：model(idx_cond) 得到 logits",
+        "取最后一个位置 logits[:, -1, :] 并 softmax 成概率",
+        "argmax 贪心挑出下一个 token",
+        "torch.cat 拼回序列末尾，进入下一轮"
+      ],
+      "success": "正确！这就是自回归。",
+      "explain": "『预测最后一个位置 → 拼接 → 再预测』循环 max_new_tokens 次。因果掩码保证了最后位置的 logits 恰好是对下一个词的预测。"
+    }
+    </script>
+  </div>
+
+  <h2><span class="secno">§4</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题",
+      "questions": [
+        {
+          "q": "生成时为什么取 logits[:, -1, :]？",
+          "options": ["因果掩码下它看完整个上文", "最后一个位置最容易被预测", "第一个位置的信息已经丢失", "中间位置的输出被掩蔽掉"],
+          "answer": 0,
+          "explain": "因果掩码让每个位置只看过去——最后位置看完了全部输入，它的 logits 即『下一个词』的判断。"
+        },
+        {
+          "q": "贪心解码的特点是？",
+          "options": ["每次选最大概率词", "每次随机均匀采样", "每次选最小的概率词", "每次取概率的加权均值"],
+          "answer": 0,
+          "explain": "永远挑 argmax：确定但保守，输出可能重复乏味。"
+        },
+        {
+          "q": "softmax 这一步在数学上可以省略，因为？",
+          "options": ["单调不改变顺序", "输出永远接近零", "本身没有梯度值", "与 argmax 互为反函数"],
+          "answer": 0,
+          "explain": "softmax 保序：probs 最大处即 logits 最大处，argmax 结果一致。"
+        },
+        {
+          "q": "模型输出乱码的根本原因是？",
+          "options": ["权重还是随机的", "词表设计得太小", "上下文长度太短", "因果掩码方向错了"],
+          "answer": 0,
+          "explain": "架构正确、参数未训练——预训练（第 5 章）就是让它学会语言规律。"
+        },
+        {
+          "q": "model.eval() 在生成前的作用是？",
+          "options": ["关闭训练期组件", "清空全部的梯度", "压缩模型的参数", "重置随机的种子"],
+          "answer": 0,
+          "explain": "eval 模式关闭 dropout 等只在训练期生效的随机组件，推理结果确定。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：第 4 章通关！你能默写生成循环、解释为什么取最后位置、以及为什么未训练的模型胡言乱语。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 11 课「预训练」⭐ 全书高潮</strong><br>
+    教模型说话的时刻到了：交叉熵损失如何衡量"胡话的程度"、训练循环怎么把损失从 10+ 压到 1 以下、AdamW 优化器怎么选。我们将在《The Verdict》上真实预训练一个小 GPT。对应书 §5.1–5.2。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    到这里值得庆祝：架构部分（全书最难）已全部通关。喘口气，问任何想深挖的问题——比如"context_size 裁剪后位置嵌入还对应吗"这种好问题。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 10 课 · 主教材 §4.7 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch04" target="_blank">ch04</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

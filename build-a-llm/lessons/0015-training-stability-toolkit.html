@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 15 课 · 训练稳定三件套</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 15 课 · Build a LLM From Scratch · 对应书附录 D</p>
+  <h1>训练稳定三件套：预热、衰减、裁剪</h1>
+  <p class="subtitle">工业级训练循环的三个标配配件：学习率先热身、再收油、梯度别超速。附录 D 一章讲透。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：指令微调的巧思",
+      "questions": [
+        {
+          "q": "目标序列里的 -100 表示什么？",
+          "options": ["损失忽略该位置", "该词概率最高", "此处截断序列", "填充符的别名"],
+          "answer": 0,
+          "explain": "cross_entropy 默认 ignore_index=-100：填充位与指令位不计损失，只学响应。"
+        },
+        {
+          "q": "Alpaca 格式的三个段落是？",
+          "options": ["指令输入与响应", "用户系统与助手", "上下文问题与答案", "开头正文与结尾"],
+          "answer": 0,
+          "explain": "### Instruction / ### Input / ### Response。"
+        },
+        {
+          "q": "指令微调为什么保留一个 50256 目标？",
+          "options": ["教模型学会停笔", "对齐批内最长长度", "标记答案的起点", "提高采样的温度"],
+          "answer": 0,
+          "explain": "学会输出 <|endoftext|>，生成时作为停止信号。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>学习率预热：先热身再冲刺</h2>
+  <p>训练刚开始时权重是"生"的：万一开局就遇到大梯度，学习率又大，几步就能把模型推废。<span class="term">学习率预热<span class="en">（learning rate warmup）</span></span>：前 N 步从很小的 <code>initial_lr</code> <b>线性爬升</b>到 <code>peak_lr</code>，之后正常训练。</p>
+
+<pre><code class="language-python">warmup_steps = int(0.2 * total_steps)      # 预热步数：总步数的 0.1%–20%
+lr_increment = (peak_lr - initial_lr) / warmup_steps
+
+if global_step < warmup_steps:
+    lr = initial_lr + global_step * lr_increment   # 线性爬坡
+else:
+    lr = peak_lr                                   # （下一节：改为余弦下降）</code></pre>
+
+  <span class="cite">——《书》附录 D.1, pp.355–357（图 D.1）</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>余弦衰减：逐渐收油门</h2>
+  <p>训练后期如果学习率仍是大步，模型会在最小值附近<b>越过</b>最优区来回震荡。<span class="term">余弦衰减<span class="en">（cosine decay）</span></span>：预热结束后让学习率沿半个余弦周期平滑滑落到 <code>min_lr</code>：</p>
+
+<pre><code class="language-python">progress = (global_step - warmup_steps) / (total_steps - warmup_steps)
+lr = min_lr + (peak_lr - min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
+# progress: 0 → 1，cos 从 +1 → −1，lr 从 peak_lr → min_lr 平滑下降</code></pre>
+
+  <p>合起来就是著名的"爬坡—滑落"曲线（图 D.2）：前 20 步线性升，之后余弦降到接近零。这是 GPT-3、Llama 等大模型训练的标配形状。</p>
+  <span class="cite">——《书》附录 D.2, pp.357–359（图 D.2）</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>梯度裁剪：给梯度限速</h2>
+  <p><span class="term">梯度裁剪<span class="en">（gradient clipping）</span></span>防的是第 8 课提过的梯度爆炸：若所有梯度的 L2 范数（把全部梯度拉成一个超长向量算欧氏长度）超过阈值，就整体等比例缩小到阈值。</p>
+
+<pre><code class="language-python">torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+# 书中实测：最大梯度值 0.0411 → 0.0185</code></pre>
+
+  <p>书里的手算例子：梯度矩阵的 L2 范数是 5，超过 max_norm=1，就乘以缩放因子 1/5——方向不变、长度归 1。注意在 train_model 里裁剪放在 <b>backward 之后、step 之前</b>（且预热结束后才启用）。</p>
+  <span class="cite">——《书》附录 D.3, pp.359–361</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>合体：改进版 train_model</h2>
+  <p>三件套装进第 11 课的训练循环，只有三处改动：</p>
+<pre><code class="language-python">for epoch in range(n_epochs):
+    for input_batch, target_batch in train_loader:
+        optimizer.zero_grad()
+        global_step += 1
+        # 改动 ①：动态调 lr（预热 + 余弦）
+        lr = warmup_or_cosine(global_step)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
+        loss = calc_loss_batch(...); loss.backward()
+        # 改动 ②：预热结束后裁剪
+        if global_step > warmup_steps:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()          # 改动 ③：无——五步咒骨架不变！</code></pre>
+  <p>在《The Verdict》上 15 epoch：train loss 10.93 → 0.04（依旧过拟合——数据太小，与技巧无关；三件套管的是<b>稳</b>，不是过拟合）。真实场景的大规模预训练里，这套配方几乎是默认起手式。</p>
+  <span class="cite">——《书》附录 D.4, pp.361–363</span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 一个训练步内的事件顺序",
+      "intro": "把带三件套的一步按真实执行顺序排列",
+      "items": [
+        "zero_grad 清空梯度",
+        "按 global_step 计算学习率（预热或余弦）",
+        "前向传播并计算损失",
+        "loss.backward 反向传播",
+        "梯度裁剪 clip_grad_norm_",
+        "optimizer.step 更新参数"
+      ],
+      "success": "正确！裁剪必须在 backward 之后、step 之前。",
+      "explain": "先有梯度才谈得上裁剪；裁完的梯度才是 step 用的梯度。学习率调整发生在 step 之前任意时刻均可，但通常放在循环开头统一处理。"
+    }
+    </script>
+  </div>
+
+  <h2><span class="secno">§5</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题",
+      "questions": [
+        {
+          "q": "学习率预热解决什么风险？",
+          "options": ["开局大更新冲坏模型", "后期学习率过低", "梯度裁剪失效", "数据类别不平衡"],
+          "answer": 0,
+          "explain": "初始权重是生的：小步起步，线性爬升到 peak_lr，避免早期不稳定的大更新。"
+        },
+        {
+          "q": "余弦衰减的形状是？",
+          "options": ["先升后降的余弦", "一路线性下降", "阶跃式断崖下降", "保持不变直到结束"],
+          "answer": 0,
+          "explain": "预热结束后沿半余弦周期从 peak_lr 平滑滑向 min_lr，避免越过最小值。"
+        },
+        {
+          "q": "clip_grad_norm_ 超阈值时怎么处理？",
+          "options": ["等比例缩小梯度", "直接截断最大值", "随机丢弃部分梯度", "重置梯度为均值"],
+          "answer": 0,
+          "explain": "乘以 max_norm/||G||：方向不变，L2 范数恰好压到阈值（书中 1/5 的例子）。"
+        },
+        {
+          "q": "梯度裁剪的正确位置是？",
+          "options": ["反向传播之后", "反向传播之前", "参数更新之后", "损失计算之前"],
+          "answer": 0,
+          "explain": "backward 产出梯度 → 裁剪 → step 用裁过的梯度更新。"
+        },
+        {
+          "q": "预热步数的常见设置范围是？",
+          "options": ["总步数的零点一至两成", "恰好等于一个周期", "固定的一千零二十四步", "总参数量的百分之一"],
+          "answer": 0,
+          "explain": "0.1%–20%，书的例子取 20%（27 步）。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你能画出完整的学习率调度曲线（爬坡 + 余弦滑落），并说清三件套各防什么病（开局失稳 / 后期震荡 / 梯度爆炸）。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 16 课（最后一课）「LoRA」</strong><br>
+    全书压轴：只训练 0.2% 的参数（124M 中的 266 万）微调出 98% 准确率的分类器——低秩适应 LoRA，现代 LLM 工程师必杀技。对应书附录 E。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    "你们的训练用了什么 lr schedule？"是面试官试探工程素养的经典题——能答出 warmup + cosine decay + clipping 三件套及各自动机，就非常体面了。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 15 课 · 主教材附录 D · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/appendix-D" target="_blank">appendix-D</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

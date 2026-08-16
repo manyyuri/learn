@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>分词管道速查 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Reference · 分词管道速查</p>
+  <h1>从文字到张量：完整管道</h1>
+  <p class="subtitle">第 2–3 课的内容浓缩。对应书第 2 章（pp.27–64）。</p>
+
+  <h2>一、管道总览</h2>
+<pre><code>"Hello, world!"
+  → 分词器 tokenize      （BPE：子词切分）
+  → token IDs [15496, 11, 995]
+  → 嵌入查表 nn.Embedding(50257, 768)   → [T, 768]
+  → + 位置嵌入 pos_emb[0..T-1]          → [T, 768]
+  → 送入 Transformer（第 8-9 课）</code></pre>
+
+  <h2>二、三种分词方案对比</h2>
+  <table>
+    <tr><th>方案</th><th>词表大小</th><th>未知词处理</th><th>代表</th></tr>
+    <tr><td>词级 word-based</td><td>巨大（书例 1130）</td><td>&lt;|unk|&gt;</td><td>SimpleTokenizerV1</td></tr>
+    <tr><td>字符级 char-based</td><td>极小（~256）</td><td>无此问题</td><td>—</td></tr>
+    <tr><td><b>子词 BPE</b></td><td>中等（50257）</td><td>拆到字节必能表示</td><td>tiktoken / GPT-2</td></tr>
+  </table>
+
+  <h2>三、BPE 要点</h2>
+  <ul>
+    <li>从字符出发，反复合并语料中最高频的<b>相邻对</b>，直到词表满（50257）</li>
+    <li>常见词成整体 token，罕见词拆成子词——兼顾词表大小与序列长度</li>
+    <li>字节级实现：任何 UTF-8 文本都能编码，永不出现 &lt;|unk|&gt;</li>
+    <li>tiktoken 用法：<code>enc = tiktoken.get_encoding("gpt2"); ids = enc.encode(text)</code></li>
+  </ul>
+
+  <h2>四、特殊 token</h2>
+  <table>
+    <tr><th>token</th><th>ID</th><th>用途（书中出现处）</th></tr>
+    <tr><td>&lt;|endoftext|&gt;</td><td>50256</td><td>文档分隔（第2课）→ 填充符（第13/14课）→ 生成停止符（第12课）——一符三用</td></tr>
+    <tr><td>&lt;|unk|&gt;</td><td>（SimpleTokenizerV1 教学用）</td><td>未登录词占位（第2课）</td></tr>
+  </table>
+
+  <h2>五、训练样本构造：滑动窗口</h2>
+<pre><code>token IDs: [t1 t2 t3 t4 t5 t6 ...]
+max_length=4, stride=4:
+  样本1: x=[t1 t2 t3 t4]  y=[t2 t3 t4 t5]   ← y 是 x 右移一位
+  样本2: x=[t5 t6 t7 t8]  y=[t6 t7 t8 t9]
+Dataset + DataLoader(batch_size=4, shuffle=True) → [4, 4] 的输入/目标对</code></pre>
+  <p>stride=max_length：窗口不重叠，省算力（预训练惯例）；stride&lt;max_length：重叠窗口，小数据集多产样本。</p>
+
+  <p style="margin-top:2em"><a href="../lessons/index.html">← 返回课程导航</a> · <a href="glossary.html">术语表</a></p>
+
+  <footer>
+    <p>Build a LLM From Scratch · 参考文档 · 依据主教材第 2 章整理</p>
+  </footer>
+</main>
+</body>
+</html>

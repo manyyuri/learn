@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 7 课 · PyTorch 检查点</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 7 课 · Build a LLM From Scratch · 对应书附录 A ⭐ 门槛课</p>
+  <h1>PyTorch 速成：为代码课清障</h1>
+  <p class="subtitle">从第 8 课起全是 PyTorch 代码。这一课把必需的全部装进脑子：张量、自动微分、nn.Module、训练循环——五件事，一件不多。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：第 3 章的收尾",
+      "questions": [
+        {
+          "q": "因果掩码用什么值填充未来位置？",
+          "options": ["负无穷大值", "正无穷大值", "零减去一位", "均值加标准差"],
+          "answer": 0,
+          "explain": "−∞ 在 softmax 中自然归零（e^−∞=0），一步到位且无信息泄漏。"
+        },
+        {
+          "q": "多头注意力的『头』是怎么来的？",
+          "options": ["拆分投影结果", "堆叠多个模型", "复制输入序列", "循环多次前向"],
+          "answer": 0,
+          "explain": "一次大投影后 .view 拆成 num_heads 份，各头独立算注意力再拼接。"
+        },
+        {
+          "q": "GPT-2 多少头、每头几维？",
+          "options": ["12 头 64 维", "64 头 12 维", "12 头 96 维", "96 头 12 维"],
+          "answer": 0,
+          "explain": "12 头 × 64 维 = 768 总维度。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>PyTorch 是什么：三大组件</h2>
+  <p>书附录 A 开篇把 PyTorch 拆成三块（图 A.1），也是本课的地图：</p>
+  <table>
+    <tr><th>组件</th><th>一句话</th><th>本书用在哪</th></tr>
+    <tr><td><b>张量库<span class="en">（tensor library）</span></b></td><td>带 GPU 加速的 NumPy——多维数组 + 数学运算</td><td>所有数据搬运与计算</td></tr>
+    <tr><td><b>自动微分<span class="en">（autograd）</span></b></td><td>自动算梯度，替你完成反向传播的微积分</td><td>训练（第 5 章起）</td></tr>
+    <tr><td><b>深度学习工具箱<span class="en">（nn 模块）</span></b></td><td>层、损失函数、优化器等积木</td><td>搭 GPT 架构（第 4 章起）</td></tr>
+  </table>
+  <span class="cite">——《书》附录 A.1.1, pp.285–286</span>
+
+  <div class="sidenote">装环境（现在就可以做，第 11 课才真正需要）：<code>pip install torch</code>。你的 Mac 若是 Apple Silicon，<code>torch.backends.mps.is_available()</code> 返回 True 就能用 M 系芯片加速（书附录 A.9.2 专门讲了 macOS 场景）。没有 GPU 也完全不影响本书所有代码——只是慢一点。</div>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>张量：五分钟上手</h2>
+  <p><span class="term">张量<span class="en">（tensor）</span></span>就是多维数组：标量 0 维、向量 1 维、矩阵 2 维、更高维就叫 3D/4D 张量。创建与最常用操作：</p>
+
+<pre><code class="language-python">import torch
+tensor0d = torch.tensor(1)                 # 标量
+tensor1d = torch.tensor([1, 2, 3])         # 向量 → dtype torch.int64
+floatvec = torch.tensor([1.0, 2.0, 3.0])   # 浮点 → torch.float32（DL 默认，省内存+GPU优化）
+tensor2d = torch.tensor([[1, 2, 3],
+                         [4, 5, 6]])       # 矩阵 [2, 3]
+
+tensor2d.shape          # torch.Size([2, 3])
+tensor2d.reshape(3, 2)  # 重塑（不连续时自动复制）
+tensor2d.view(3, 2)     # 重塑（更快，但要求内存连续）—— 第 6 课拆头用的就是它
+tensor2d.T              # 转置 [3, 2]
+tensor2d @ tensor2d.T   # 矩阵乘法 = .matmul()  [2, 2]
+tensor1d.to(torch.float32)  # 类型转换</code></pre>
+
+  <p>给 JS 开发者的类比：<code>tensor ≈ 更严格的 TypedArray + 广播规则 + GPU 后端</code>。你在第 6 课已经见过它的实战——(b, T, 768) 的 4D 变形与转置。</p>
+  <span class="cite">——《书》附录 A.2, pp.292–297</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>autograd：自动算梯度</h2>
+  <p>训练的本质是"算出每个参数该往哪边微调"（梯度）。PyTorch 的方案：只要你对 <code>requires_grad=True</code> 的张量做运算，它就在后台默默画一张<span class="term">计算图<span class="en">（computational graph）</span></span>，记录每一步谁参与了什么运算。然后一句 <code>loss.backward()</code> 沿图反向应用链式法则，把所有梯度存进各参数的 <code>.grad</code> 属性——<b>你全程没算过一个导数</b>（书 A.3–A.4）。</p>
+
+<pre><code class="language-python">w1 = torch.tensor([1.0], requires_grad=True)   # 声明：这个参数要学
+b  = torch.tensor([0.0], requires_grad=True)
+# ... 前向计算得到 loss ...
+loss.backward()      # 反向传播：梯度自动存入 w1.grad、b.grad
+print(w1.grad)       # tensor([-0.0898]) —— 这就是"该往哪边调"的方向</code></pre>
+
+  <span class="cite">——《书》附录 A.3–A.4, pp.297–301</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>nn.Module：搭网络的积木</h2>
+  <p>所有 PyTorch 模型都继承 <code>nn.Module</code>：在 <code>__init__</code> 里声明层，在 <code>forward</code> 里写数据流。层的输入输出维度由你指定，权重<b>自动</b>随机初始化（打破对称性）并自动登记为可训练参数：</p>
+
+<pre><code class="language-python">import torch.nn as nn
+
+class NeuralNetwork(nn.Module):
+    def __init__(self, num_inputs, num_outputs):
+        super().__init__()
+        self.layers = nn.Sequential(            # 按顺序执行的层容器
+            nn.Linear(num_inputs, 30),          # 全连接层：y = xW + b
+            nn.ReLU(),                          # 激活函数（非线性）
+            nn.Linear(30, 20),
+            nn.ReLU(),
+            nn.Linear(20, num_outputs),
+        )
+    def forward(self, x):
+        return self.layers(x)
+
+model = NeuralNetwork(50, 3)
+print(model)                                     # 打印结构摘要
+sum(p.numel() for p in model.parameters())       # 2213 个可训练参数
+# model(x) 会自动调用 forward —— 不用写 model.forward(x)</code></pre>
+
+  <p>你写过的 <code>SelfAttention_v1</code>、<code>MultiHeadAttention</code> 全是这个套路——现在回头看第 5、6 课的类，是不是豁然开朗？</p>
+  <span class="cite">——《书》附录 A.5, pp.301–306（列表 A.4）</span>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>DataLoader 与训练循环：五步咒语</h2>
+  <p><code>Dataset</code>（怎么取一条样本）+ <code>DataLoader</code>（怎么打包成批）负责喂数据（你在第 3 课已经用过）。而所有 PyTorch 训练循环都是同一句五步咒语，值得背下来：</p>
+
+<pre><code class="language-python">loss_fn   = nn.BCELoss()                          # 损失函数：量化"错多少"
+optimizer = torch.optim.SGD(model.parameters(), lr=0.05)   # 优化器：怎么调
+
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        optimizer.zero_grad()     # ① 清空上轮梯度（否则会累加！）
+        out  = model(x)           # ② 前向：算出预测
+        loss = loss_fn(out, y)    #    算损失
+        loss.backward()           # ③ 反向：autograd 算梯度
+        optimizer.step()          # ④ 更新参数 w -= lr * grad
+                                  # ⑤ 下一轮，直到 epoch 耗尽</code></pre>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 训练循环五步咒",
+      "intro": "把一轮训练中的操作按真实顺序点出来",
+      "items": [
+        "optimizer.zero_grad() 清空旧梯度",
+        "model(x) 前向传播得预测",
+        "loss_fn(pred, y) 计算损失",
+        "loss.backward() 反向传播算梯度",
+        "optimizer.step() 按梯度更新参数"
+      ],
+      "success": "正确！这个顺序在第 11 课预训练 GPT 时原样出现。",
+      "explain": "zero 必须在 backward 之前（PyTorch 梯度默认累加）；step 必须在 backward 之后（没梯度就无从更新）。顺序错了训练就废了。"
+    }
+    </script>
+  </div>
+
+  <div class="sidenote">存取模型（第 12 课会用到）：训练产物是 <code>state_dict</code>——参数名到张量的字典。<code>torch.save(model.state_dict(), "model.pth")</code> / <code>model.load_state_dict(torch.load("model.pth"))</code>（书 A.8）。搬设备：<code>model.to(device)</code>，Mac 上 <code>device = "mps"</code>（若可用）。</div>
+  <span class="cite">——《书》附录 A.6–A.8, pp.307–318</span>
+
+  <h2><span class="secno">§6</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 7 题 · 过关就具备了全书代码课的全部前置",
+      "questions": [
+        {
+          "q": "PyTorch 的三大核心组件是？",
+          "options": ["张量库与自动微分及深度学习工具箱", "张量库与数据集及可视化工具箱", "自动微分与张量库及分布式框架", "深度学习工具箱与编译器和虚拟机"],
+          "answer": 0,
+          "explain": "张量库（计算）、autograd（梯度）、nn 模块（积木）。三大件撑起全书。"
+        },
+        {
+          "q": "PyTorch 浮点张量默认精度是？",
+          "options": ["32 位浮点数", "64 位浮点数", "16 位浮点数", "8 位定点数"],
+          "answer": 0,
+          "explain": "float32：精度足够、省内存、GPU 专为它优化（int64 是整数默认）。"
+        },
+        {
+          "q": "autograd 靠什么知道梯度怎么算？",
+          "options": ["后台记录的计算图", "人工编写的导数", "预置的公式表", "数值差分近似"],
+          "answer": 0,
+          "explain": "对 requires_grad=True 的张量，每个运算都被记入计算图，backward 沿图反向用链式法则算梯度。"
+        },
+        {
+          "q": "loss.backward() 之后梯度存在哪？",
+          "options": ["参数的 grad 属性", "损失函数内部", "优化器的状态里", "计算图的节点上"],
+          "answer": 0,
+          "explain": "backward 把梯度写入各叶参数的 .grad（如 w1.grad），optimizer.step() 读取它们更新参数。"
+        },
+        {
+          "q": "自定义模型必须实现的方法是？",
+          "options": ["forward 方法", "backward 方法", "train 方法", "summary 方法"],
+          "answer": 0,
+          "explain": "__init__ 里声明层、forward 里写数据流；backward 由 autograd 自动生成，不用写。"
+        },
+        {
+          "q": "每轮训练前为何必须 zero_grad？",
+          "options": ["梯度会自动累加", "显存会一直泄漏", "损失会逐渐变大", "参数会随机重置"],
+          "answer": 0,
+          "explain": "PyTorch 梯度默认累加（为支持梯度累积等场景），不清零的话本轮会踩着上轮的梯度走。"
+        },
+        {
+          "q": "model(x) 与 model.forward(x) 的关系是？",
+          "options": ["前者自动调用后者", "后者是前者的别名", "两者完全无关", "前者不能用于训练"],
+          "answer": 0,
+          "explain": "nn.Module 重载了 __call__，model(x) 会调用 forward 并顺带执行钩子等机制——永远用 model(x)。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：训练循环五步咒能默写、能解释 <code>zero_grad</code> 的位置原因、知道梯度从哪来到哪去。从下一课起，代码对你不再是天书。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 8 课「GPT 骨架」</strong><br>
+    正式开搭 GPT！先立配置字典（GPT-2 124M 的全部参数：768 维、12 头、12 层、上下文 1024），再实现三个小零件：层归一化 LayerNorm、GELU 激活、前馈网络 FFN，最后加上残差连接。对应书 §4.1–4.4。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    动手是这课的最好复习：把训练循环五步在纸上抄一遍再默写一遍。环境配置遇到问题（pip 装不上、mps 不可用）直接贴报错给我。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 7 课 · 主教材附录 A · <a href="../reference/glossary.html">术语表</a> · 延伸：<a href="https://pytorch.org/tutorials/beginner/basics/intro.html" target="_blank">PyTorch 官方 Learn the Basics</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

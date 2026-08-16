@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 4 课 · 注意力的直觉</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 4 课 · Build a LLM From Scratch · 对应书 §3.1–3.3</p>
+  <h1>注意力的直觉：一个词该关注谁？</h1>
+  <p class="subtitle">不用任何可训练权重，只用向量点积，你将亲手算出第一个自注意力——这是理解 GPT 全部能力的钥匙。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：第 3 课的管道",
+      "questions": [
+        {
+          "q": "BPE 分词器的最大优势是？",
+          "options": ["永不遇到未知词", "词表更小更省内存", "编码速度更快十倍", "完美保留大小写信息"],
+          "answer": 0,
+          "explain": "未知词拆成子词/字符，任何文本都能编码——所以 GPT 不需要 <|unk|>。"
+        },
+        {
+          "q": "滑动窗口里，目标序列怎么来的？",
+          "options": ["输入右移一位", "输入左移一位", "输入颠倒顺序", "输入循环移位"],
+          "answer": 0,
+          "explain": "y = x 右移一位：每个位置预测下一个词。"
+        },
+        {
+          "q": "位置嵌入解决什么问题？",
+          "options": ["自注意力无位置感", "词表存在未知词", "批量样本长度不一", "嵌入维度不够高"],
+          "answer": 0,
+          "explain": "同一 token 在任何位置查表结果都相同，必须显式注入位置信息。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>为什么需要注意力：RNN 的教训</h2>
+  <p>Transformer 之前，机器翻译的主力是编码器-解码器 <span class="term">循环神经网络<span class="en">（RNN, Recurrent Neural Network）</span></span>：编码器逐词读入句子，把全部含义压缩进一个"最终隐藏状态"，解码器再拿着这一个向量逐词生成翻译。</p>
+  <p>问题就出在"压缩进一个向量"：句子越长，早期信息被稀释得越厉害，<b>长距离依赖</b>（如主语和远处的谓语）经常丢失。2014 年的 Bahdanau 注意力给解码器开了一扇窗：生成每个词时，可以<b>回头选择性查看</b>输入序列的不同部分——"哪些输入对当前这个词更重要"。2017 年，研究者更进一步：<b>把 RNN 扔掉，注意力本身就是全部</b>——这就是 Transformer（书 §3.1–3.2）。</p>
+  <span class="cite">——《书》§3.1–3.2, pp.66–70</span>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>"自"注意力：句内自查</h2>
+  <p><span class="term">自注意力<span class="en">（self-attention）</span></span>的"自"，指一个序列<b>自己内部</b>互相打量：每个词计算自己的表示时，会参考句中所有其他词与它的相关性。目标是给每个输入 x⁽ⁱ⁾ 算出一个<span class="term">上下文向量<span class="en">（context vector）</span></span> z⁽ⁱ⁾——一个"吸收了全句信息"的增强版嵌入。</p>
+  <p>用书的例句（每词已嵌入为 3 维向量）：</p>
+
+<pre><code class="language-python">inputs = torch.tensor([
+  [0.43, 0.15, 0.89],  # x⁽¹⁾ Your
+  [0.55, 0.87, 0.66],  # x⁽²⁾ journey
+  [0.57, 0.85, 0.64],  # x⁽³⁾ starts
+  [0.22, 0.58, 0.33],  # x⁽⁴⁾ with
+  [0.77, 0.25, 0.10],  # x⁽⁵⁾ one
+  [0.05, 0.80, 0.55],  # x⁽⁶⁾ step
+])</code></pre>
+
+  <p>我们来为 "journey"（x⁽²⁾）计算 z⁽²⁾。三步走：</p>
+
+  <h3>第 1 步 · 打分：点积衡量相似度</h3>
+  <p>用 x⁽²⁾ 当<span class="term">查询<span class="en">（query）</span></span>，与每个词做<span class="term">点积<span class="en">（dot product）</span></span>，得到<span class="term">注意力分数<span class="en">（attention score）</span></span> ω：</p>
+
+<pre><code class="language-python">query = inputs[1]
+attn_scores_2 = torch.empty(6)
+for i, x_i in enumerate(inputs):
+    attn_scores_2[i] = torch.dot(x_i, query)
+# → [0.9544, 1.4950, 1.4754, 0.8434, 0.7070, 1.0865]</code></pre>
+
+  <p>点积越大，两个向量越"对齐"——"journey" 与 "starts"（1.4754）关系紧密，与 "one"（0.7070）关系疏远。点积就是注意力世界的相似度尺子。</p>
+
+  <h3>第 2 步 · 归一化：分数变权重</h3>
+  <p>把分数除以总和（或用 <b>softmax</b>，实践中永远用 softmax——对极端值更稳、梯度性质更好），得到和为 1 的<span class="term">注意力权重<span class="en">（attention weight）</span></span> α：</p>
+
+<pre><code class="language-python">attn_weights_2 = torch.softmax(attn_scores_2, dim=0)
+# → [0.1385, 0.2379, 0.2333, 0.1240, 0.1082, 0.1581]   总和 = 1</code></pre>
+
+  <h3>第 3 步 · 加权求和：信息汇聚</h3>
+  <p>用权重把所有词的向量加权平均，得到 z⁽²⁾：</p>
+
+<pre><code class="language-python">context_vec_2 = attn_weights_2 @ inputs    # → [0.4419, 0.6515, 0.5683]</code></pre>
+
+  <p>z⁽²⁾ 现在不再是孤立的 "journey"，而是吸收了 "Your / starts / with / one / step" 信息的融合向量——<b>这就是"理解了上下文的词"</b>。</p>
+  <span class="cite">——《书》§3.3.1, pp.71–77（图 3.8–3.10）</span>
+
+  <div class="widget" data-order>
+    <script type="application/json">
+    {
+      "title": "动手 · 简化自注意力三步曲",
+      "intro": "把计算 z⁽²⁾ 的步骤按真实顺序点出来",
+      "items": [
+        "选查询词 x⁽²⁾，与全部词做点积 → 注意力分数 ω",
+        "softmax 归一化 → 注意力权重 α（每行和为 1）",
+        "用 α 对所有词向量加权求和 → 上下文向量 z⁽²⁾"
+      ],
+      "success": "正确！打分 → 归一 → 汇聚。",
+      "explain": "三步是自注意力一切的骨架。第 5 课加入可训练的 q/k/v 投影，第 6 课加上因果掩码和多头——骨架不变。"
+    }
+    </script>
+  </div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>一步到位：矩阵化</h2>
+  <p>上面是给一个词算 z。给所有词同时算，只需把循环换成<b>矩阵乘法</b>（快得多，GPU 友好）：</p>
+
+<pre><code class="language-python">attn_scores = inputs @ inputs.T              # 6×6：所有查询-键点积
+attn_weights = torch.softmax(attn_scores, dim=-1)  # 每行归一化
+all_context_vecs = attn_weights @ inputs     # 6×3：每个词的上下文向量</code></pre>
+
+  <p>注意 <code>attn_scores</code> 的形状 6×6：第 i 行 j 列 = 词 i 对词 j 的关注程度。这个方阵就是注意力的"心电图"，下一课的因果掩码、多头拆分全发生在它身上。</p>
+  <span class="cite">——《书》§3.3.2, pp.77–79</span>
+
+  <h2><span class="secno">§4</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "RNN 编码器-解码器的核心缺陷是？",
+          "options": ["长距离依赖丢失", "无法处理标点", "训练速度过快", "词表无法扩展"],
+          "answer": 0,
+          "explain": "整句压进一个最终隐藏状态，长句的早期信息被稀释。注意力机制因此而生。"
+        },
+        {
+          "q": "自注意力中的『自』指什么？",
+          "options": ["序列内部自查相关", "自己监督自己的训练", "自我复制权重的机制", "自动调参的过程"],
+          "answer": 0,
+          "explain": "一个序列内部各位置互相打分，不同于两个序列之间（如翻译输入↔输出）的传统注意力。"
+        },
+        {
+          "q": "上下文向量 z⁽ⁱ⁾ 的本质是什么？",
+          "options": ["全句信息的加权融合", "词表中的整数编号", "位置信息的编码形式", "独热编码的转置向量"],
+          "answer": 0,
+          "explain": "z⁽ⁱ⁾ = 所有词向量按注意力权重的加权平均——吸收了上下文的增强版嵌入。"
+        },
+        {
+          "q": "为什么用点积来打注意力分数？",
+          "options": ["衡量向量相似程度", "计算速度绝对最快", "保证结果归一化为", "避免数值溢出风险"],
+          "answer": 0,
+          "explain": "点积量化两个向量的对齐程度：越对齐越相似，分数越高。"
+        },
+        {
+          "q": "softmax 相比除以总和的优势是？",
+          "options": ["梯度性质更良好", "计算步数更简短", "输出数值更整齐", "内存占用更加小"],
+          "answer": 0,
+          "explain": "softmax 处理极端值更稳、训练时梯度更友好，且保证输出全为正、总和为 1。"
+        },
+        {
+          "q": "attn_scores 矩阵第 i 行第 j 列的值含义是？",
+          "options": ["词 i 关注词 j 的分数", "词 j 关注词 i 的分数", "词 i 与 j 的距离", "词 i 的位置编码值"],
+          "answer": 0,
+          "explain": "行=查询（谁在看），列=键（看谁）。归一化沿最后一维（每行）进行。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你能白板推导简化版自注意力：点积打分 → softmax 归一 → 加权求和，并解释为什么点积能当相似度尺子。这是面试"讲讲注意力机制"的地基。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 5 课「查询、键、值」</strong><br>
+    简化版自注意力还有个致命缺陷：它没有<b>任何可学习的东西</b>。下一课引入三个权重矩阵 W_q、W_k、W_v，理解数据库式的"查询-键-值"类比，以及为什么要除以 √d_k（缩放点积注意力）。对应书 §3.4。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    这三章是全书最难的部分，卡住极其正常——把困惑的那句话直接贴给我，我换个角度讲。推荐配合 <a href="https://www.youtube.com/watch?v=eMlx5fFNoYc" target="_blank">3Blue1Brown 注意力可视化</a>食用。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 4 课 · 主教材 §3.1–3.3 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch03" target="_blank">ch03</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/order.js"></script>
+</body>
+</html>

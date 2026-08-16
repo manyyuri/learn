@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 13 课 · 分类微调</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 13 课 · Build a LLM From Scratch · 对应书第 6 章</p>
+  <h1>分类微调：GPT 变身垃圾短信侦探</h1>
+  <p class="subtitle">只换一个输出头、只解冻三处参数，5 分钟训练（M3 MacBook）把垃圾短信识别率从 50% 抬到 97.5%——微调性价比的极致示范。</p>
+
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "热身：上一课的收尾",
+      "questions": [
+        {
+          "q": "top-k 采样屏蔽非候选 token 的方法是？",
+          "options": ["logits 设为负无穷", "概率值直接置一", "从词表里删掉词", "logits 全体加一个常数"],
+          "answer": 0,
+          "explain": "-inf 经 softmax 归零——与因果掩码同款技巧。"
+        },
+        {
+          "q": "加载 OpenAI 权重后为何要把 qkv_bias 设为 True？",
+          "options": ["匹配权重形状约定", "提升模型的表达力", "绕开 GPU 的限制", "加快下载的速度"],
+          "answer": 0,
+          "explain": "GPT-2 原版带偏置向量；架构约定必须与被加载的权重完全一致。"
+        },
+        {
+          "q": "判断权重装对了的直观验收是？",
+          "options": ["能生成连贯文本", "文件大小完全一致", "下载校验和通过", "配置参数无报错"],
+          "answer": 0,
+          "explain": "装错任何张量输出立刻乱码；流畅文本 = 加载成功。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>两种微调：专才 vs 通才</h2>
+  <p>拿到预训练模型后，把它变成产品的两条路（书 §6.1）：</p>
+  <table>
+    <tr><th></th><th>分类微调<span class="en">（classification finetuning）</span></th><th>指令微调<span class="en">（instruction finetuning）</span></th></tr>
+    <tr><td>输出</td><td>固定类别（如 spam / ham）</td><td>自由生成的文本</td></tr>
+    <tr><td>能力</td><td>只会一件事，但很擅长</td><td>听懂各种指令的通才</td></tr>
+    <tr><td>数据 / 算力</td><td>少、便宜</td><td>多、昂贵</td></tr>
+    <tr><td>本书位置</td><td>本课（第 6 章）</td><td>下一课（第 7 章）</td></tr>
+  </table>
+  <p class="cite">——《书》§6.1, pp.195–197</p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>备料：SMS 数据集</h2>
+  <p>UCI 的 SMS Spam Collection：5,572 条短信。两步预处理：</p>
+  <ul>
+    <li><b>欠采样平衡</b>：ham 4,825 / spam 747 → 各取 747（书选欠采样是为教学省时；实际处理不平衡还有很多方法）</li>
+    <li><b>三切分</b>：70% 训练 / 10% 验证 / 20% 测试，标签 ham→0、spam→1</li>
+  </ul>
+  <p>然后解决变长问题：短信长短不一，批处理需要等长——<span class="term">填充<span class="en">（padding）</span></span>到最长序列（训练集最长 120 token），pad 用的 token ID 是 <b>50256</b>（即 <code>&lt;|endoftext|&gt;</code>，复用第 2 课的特殊 token）。验证/测试集也 pad 到同一长度，超长的截断。</p>
+  <span class="cite">——《书》§6.2–6.3, pp.197–207</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>改造模型：换头 + 三处解冻</h2>
+  <p>先加载 gpt2-small 预训练权重（顺带验证：直接问它"这是不是垃圾短信？"——只会复读问题，因为没做过指令微调）。然后动手术：</p>
+
+<pre><code class="language-python">for param in model.parameters():
+    param.requires_grad = False                    # ① 先全部冻结
+
+model.out_head = torch.nn.Linear(                  # ② 换输出头：50257 → 2
+    in_features=BASE_CONFIG["emb_dim"],            #    768 → 2（ham / spam）
+    out_features=2)                                #    新层默认 requires_grad=True
+
+for param in model.trf_blocks[-1].parameters():    # ③ 解冻最后一个块
+    param.requires_grad = True
+for param in model.final_norm.parameters():        # ④ 解冻最终 LayerNorm
+    param.requires_grad = True</code></pre>
+
+  <p>为什么只解冻尾部？底层捕获通用语言结构（对谁都有用），顶层才需要适配具体任务——省算力还防遗忘。书附录 B 的实验证实多解冻几层能再涨点，但这些是甜点不是主菜。</p>
+  <span class="cite">——《书》§6.4–6.5, pp.207–213（列表 6.7）</span>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>为什么用最后一个 token？</h2>
+  <p>本课最精彩的一笔。改头后输出是 [b, T, 2]，但<b>只取最后一行</b>（最后 token 的 2 维 logits）算损失。为什么？回看第 6 课的因果掩码矩阵：只有最后一个 token 对<b>所有</b>前文算过注意力——它是全序列信息的汇聚点（书图 6.12）。</p>
+<pre><code class="language-python">logits = model(input_batch)[:, -1, :]              # 只取最后 token → [b, 2]
+loss = torch.nn.functional.cross_entropy(logits, target_batch)
+# 预测：argmax(logits) → 0 或 1（softmax 可省，理由同第 10 课）</code></pre>
+
+  <div class="sidenote">基线检查：未微调时 train/val/test 准确率约 46%/45%/49%——就是抛硬币（两类各半）。微调空间巨大。</div>
+  <span class="cite">——《书》§6.6, pp.217–223</span>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>训练与验收</h2>
+  <p>训练循环与预训练<b>完全同款</b>（五步咒），只把"打印生成样文"换成"算分类准确率"。AdamW，lr=5e-5（比预训练的 4e-4 小——预训练权重是宝贝，步子要小），5 个 epoch：</p>
+  <table>
+    <tr><th>Epoch</th><th>Train acc</th><th>Val acc</th></tr>
+    <tr><td>1</td><td>70%</td><td>72.5%</td></tr>
+    <tr><td>3</td><td>90%</td><td>90%</td></tr>
+    <tr><td>5</td><td><b>100%</b></td><td><b>97.5%</b></td></tr>
+  </table>
+  <p>最终 <code>classify_review()</code> 实测：<i>"You are a winner… $1000 cash"</i> → spam ✅；<i>"Hey, just wanted to check if we're still on for dinner tonight?"</i> → ham ✅。训练曲线 train/val 贴得很近——这次没有第 11 课那种过拟合（数据干净、任务简单、模型早已懂语言）。</p>
+  <span class="cite">——《书》§6.7–6.8, pp.224–233（列表 6.12）</span>
+
+  <h2><span class="secno">§6</span>检索练习</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 6 题",
+      "questions": [
+        {
+          "q": "分类微调后的模型能做什么？",
+          "options": ["只输出训练过的类别", "回答任意领域问题", "执行任意的指令", "翻译全部主流语言"],
+          "answer": 0,
+          "explain": "专才模型：只会输出微调时见过的标签（如 spam / ham），不能干别的。"
+        },
+        {
+          "q": "短信批处理的变长问题怎么解决？",
+          "options": ["用 50256 填充到等长", "全部截断成一样短", "逐条单独进行训练", "按长度分组丢弃一半"],
+          "answer": 0,
+          "explain": "pad 到最长序列（120 token），填充 ID 复用 <|endoftext|> 的 50256。"
+        },
+        {
+          "q": "分类头替换后的输出维度是？",
+          "options": ["768 输入变 2 维", "768 输入变 1 维", "2 输入变 768 维", "50257 保持不变"],
+          "answer": 0,
+          "explain": "Linear(768, 2)：两个 logits 分别对应 ham 和 spam。"
+        },
+        {
+          "q": "为什么用最后一个 token 做分类？",
+          "options": ["因果掩码下它看全句", "它的位置嵌入最大", "它离输出头最近", "它天然没有梯度"],
+          "answer": 0,
+          "explain": "只有最后 token 对所有前文做过注意力——全序列信息的汇聚点。"
+        },
+        {
+          "q": "微调用 lr 5e-5 而非 4e-4 的原因？",
+          "options": ["保护预训练权重", "绕开学习率预热", "补偿数据的不平衡", "配合梯度裁剪使用"],
+          "answer": 0,
+          "explain": "预训练权重价值巨大，小步微调；大步会把学到的语言知识冲坏。"
+        },
+        {
+          "q": "微调训练循环与预训练的主要区别是？",
+          "options": ["评估指标换准确率", "损失函数换平方差", "优化器换成了 SGD", "反向传播可以省略"],
+          "answer": 0,
+          "explain": "五步咒原样，交叉熵原样（只作用于最后 token）；只是不再打印样文而是算准确率。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：你理解了"换头 + 冻结 + 解冻尾部"这套微调手术的标准流程，以及为什么最后一个 token 能代表整条短信。这套技能直接迁移到情感分析、文档分类等一切文本分类任务。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 14 课「指令微调」</strong><br>
+    分类模型是专才，ChatGPT 是通才。下一课用 Alpaca 格式的指令数据集微调 GPT-2 medium——让模型学会听懂 "### Instruction" 并按要求作答，还请另一个 LLM 当阅卷老师。对应书第 7 章。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    面试高频："为什么微调只动最后几层？"——标准答案围绕"底层通用、顶层专用 + 计算效率 + 防灾难性遗忘"三层展开。想动手的话官方 ch06 notebook 数据集只有几百 KB。
+  </div>
+
+  <footer>
+    <p>Build a LLM From Scratch · 第 13 课 · 主教材第 6 章 · <a href="../reference/glossary.html">术语表</a> · 官方代码 <a href="https://github.com/rasbt/LLMs-from-scratch/tree/main/ch06" target="_blank">ch06</a> · 数据集 UCI SMS Spam Collection</p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

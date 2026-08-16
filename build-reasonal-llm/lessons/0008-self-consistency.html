@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 8 课 · Self-Consistency 投票 — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 8 课 · Self-Consistency：少数服从多数</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §4.6</span>
+    <span class="chip">⏱ 25–35 分钟</span>
+    <span class="chip">🎯 收获：投票把 base+CoT 推到 52%，并看清推理时扩展的收益递减曲线</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>上一课你让模型能给出不同答案了——现在的问题是怎么把"多次尝试"变成"更高准确率"。Self-consistency 的答案是投票。它是生产系统真实在用的技术（Claude 4 的并行采样），也是理解"推理时扩展收益曲线"的最佳案例——<b>什么时候加算力划算、什么时候不划算</b>，这直接回答你工作里的预算问题。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>核心思想</h2>
+
+  <p><span class="term">Self-consistency sampling</span>（<a href="https://arxiv.org/abs/2203.11171">Wang et al., 2022</a>）：同一道题，用温度+top-p 采样 <b>N 个独立解答</b>，抽取每个的最终答案，<b>选出现次数最多的</b><span class="cite">BRM §4.6</span>。逻辑：正确的解法往往殊途同归——不同推理路径会<b>汇聚到同一个答案</b>；而错误各有各的错法，票数分散。</p>
+
+  <div class="figure">
+    <div class="pipeline">
+      <div class="stage">同一 prompt<small>+ CoT</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">采样 N 次<small>T=0.8, p=0.9</small></div>
+      <div class="arrow">→</div>
+      <div class="stage">抽取答案<small>83, 22, 54, 83, 61</small></div>
+      <div class="arrow">→</div>
+      <div class="stage hl">多数票<small>83 ✅</small></div>
+    </div>
+    <div class="fig-caption"><b>图 1</b> · 书中 5 样本实测：单次贪心答 20（错），投票后 83（对）——错答案们从未聚成多数。<span class="cite">BRM §4.6</span></div>
+  </div>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>实现：30 行</h2>
+
+<pre><code>from collections import Counter
+
+def self_consistency_vote(model, tokenizer, prompt, device,
+                          num_samples=10, temperature=0.8, top_p=0.9, ...):
+    short_answers = []
+    for i in range(num_samples):                      # ① 采样 N 次
+        answer = generate_text_stream_concat_flex(
+            model, tokenizer, prompt, device,
+            max_new_tokens=2048,
+            generate_func=generate_text_top_p_stream_cache,  # 第 7 课的函数
+            temperature=temperature, top_p=top_p)
+        short_answers.append(
+            extract_final_candidate(answer))          # ② 复用 ch3 抽取器
+    counts = Counter(short_answers)
+    ...
+    top_freq = counts.most_common()[0][1]             # ③ 众数
+    final_answer = ... if 无并列 else None            #    并列 → None（待 ch5 打分）</code></pre>
+
+  <p>注意书的实现细节：并列最高票时返回 <code>None</code> 而不是硬选——下一章的置信度分数会来做 tie-breaker<span class="cite">BRM §4.6</span>。多 GPU 时 N 个样本可并行生成（省时不省总算力）。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>全书最重要的一张表</h2>
+
+  <p>MATH-500 全集实测（base 模型，T=p=0.9）<span class="cite">BRM table 4.1</span>：</p>
+
+  <table>
+    <thead><tr><th>#</th><th>方法</th><th>准确率</th><th>耗时</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>基线（贪心）</td><td>15.2%</td><td>10 min</td></tr>
+      <tr><td>3</td><td>CoT</td><td>40.6%</td><td>85 min</td></tr>
+      <tr><td>4</td><td>温度+top-p（单次）</td><td>17.8%</td><td>31 min</td></tr>
+      <tr><td>5</td><td>投票 n=3</td><td>29.6%</td><td>98 min</td></tr>
+      <tr><td>7</td><td>投票 n=10</td><td>31.6%</td><td>300 min</td></tr>
+      <tr><td>8</td><td>温度+top-p+CoT（单次）</td><td>33.4%</td><td>129 min</td></tr>
+      <tr><td>9</td><td><b>CoT + 投票 n=3</b></td><td>42.2%</td><td>212 min</td></tr>
+      <tr><td>10</td><td><b>CoT + 投票 n=5</b></td><td>48.0%</td><td>453 min</td></tr>
+      <tr><td>11</td><td><b>CoT + 投票 n=10</b></td><td><b>52.0%</b></td><td>863 min</td></tr>
+      <tr><td>2</td><td>官方 reasoning（贪心，参照）</td><td>48.2%</td><td>182 min</td></tr>
+      <tr><td>12</td><td>官方 reasoning + 投票 n=3</td><td>55.2%</td><td>544 min</td></tr>
+    </tbody>
+  </table>
+
+  <p>五个关键读数：</p>
+  <ol>
+    <li><b>投票没有 CoT 不行</b>（行 5–7：29~32%，还不如行 3 的 CoT 单次）。裸答案太短，采样多样性带来的噪声盖过了收益。<b>先 CoT 再投票</b>（行 9–11）才一路涨到 52%。</li>
+    <li><b>收益递减</b>：n=3→5→10，准确率 42→48→52，耗时 212→453→863 分钟。票数翻倍，涨点减半。</li>
+    <li><b>纯采样不涨分</b>（行 4 vs 行 1：15.2→17.8）：温度/top-p 只是<b>多样性的旋钮</b>，本身不是推理时扩展技术。</li>
+    <li><b>组合拳逼近训练效果</b>：base+CoT+投票(n=10) = 52%，超过了官方 reasoning 模型贪心的 48.2%——<b>不训练也能摸到推理模型的下沿</b>，但花的时间是 4.7 倍。</li>
+    <li><b>推理模型也能再投票</b>（行 12：48.2→55.2%）——方法正交可叠加。</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="co-label">工作决策框架</span>看到"用推理时扩展换准确率"的报价时问三个问题：① 基线是什么（行 1 还是行 3）？② n 多大、在收益曲线的哪一段？③ 有没有可以并行的算力？——递减曲线后半段的每一分准确率都是重金买的。
+  </div>
+
+  <div class="margin-note">
+    <span class="mn-label">⚠ 局限</span>投票依赖"可抽取的短最终答案"（数值/符号）。开放性任务（写文案）没有众数可言——那要靠第 9–10 课的 self-refinement。<span class="cite">BRM §4.6</span>
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">04</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>Self-consistency = 温度采样 N 份 CoT 解答 + 答案众数投票。正确的推理殊途同归，错误的各自散开。base 15%→52%（配 CoT, n=10），但收益随 n 递减、成本线性涨。</strong>
+  </div>
+
+  <h2><span class="secno">05</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/2203.11171">Self-Consistency Improves Chain-of-Thought Reasoning in Language Models</a>（Wang et al., 2022）——本课技术的出处，图 1 那张"多条路径汇聚"的图就来自它。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0009-logprob-confidence.html">log-prob 置信度</a>——进入 ch5：给模型的每个答案打一个"自信分"，投票并列时用它裁决。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：比如"n 选多少合适怎么定"、"早停（过半即停）怎么写"（书练习 4.4）。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0007-temperature-and-top-p.html">← 第 7 课</a>
+    <a class="nav-next" href="0009-logprob-confidence.html">第 9 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 8 课检索练习",
+    questions: [
+      {
+        question: "Self-consistency 提升准确率的底层逻辑是？",
+        options: ["采样让模型更自信", "正确路径答案趋同而错误分散", "投票减少 token 数量", "温度调低了输出噪声"],
+        answer: 1,
+        explain: "BRM §4.6：不同推理路径若都正确会汇聚到同一答案；错误则五花八门票数分散——众数因此更可能是对的。"
+      },
+      {
+        question: "表中「裸答案 + 投票 n=10」只有 31.6%，比 CoT 单次的 40.6% 还低，说明什么？",
+        options: ["投票本身有害无益", "投票必须搭配长推理链", "温度设置应当更高", "样本数应当更加少"],
+        answer: 1,
+        explain: "短答案缺推理链，采样噪声大、答案空间又窄；CoT 提供了「路径多样性」，投票才有料可投（行 9-11 一路上涨）。"
+      },
+      {
+        question: "投票样本数 n 从 3 涨到 10，准确率和耗时分别怎么变？",
+        options: ["两者都线性增长", "准确率递减式增长耗时线性涨", "准确率不变耗时翻倍", "准确率下降耗时也降"],
+        answer: 1,
+        explain: "BRM table 4.1 行 9-11：42.2→48.0→52.0（涨幅递减），212→453→863 min（约线性）。"
+      },
+      {
+        question: "书的实现中投票出现并列最高票时返回什么？",
+        options: ["随机挑选一个答案", "返回 None 待后续裁决", "选最先出现的答案", "重新采样一轮投票"],
+        answer: 1,
+        explain: "BRM §4.6：返回 None；下一章用 log-prob 置信度做 tie-breaker。（练习 4.3 让你实现「先出现者优先」的简单版。）"
+      },
+      {
+        question: "Self-consistency 方法的主要适用限制是？",
+        options: ["只能用于数学题目", "必须搭配很高温度", "需要可抽取的短答案", "推理模型上无法使用"],
+        answer: 2,
+        explain: "BRM §4.6：投票需要「可抽取的最终短答案」（数值/符号）；开放性生成没有众数。行 12 证明推理模型也能用，A、D 错。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

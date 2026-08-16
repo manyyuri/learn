@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 13 课 · GRPO 实操 II — Build a Reasoning Model 课程</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Build a Reasoning Model (From Scratch) · 中文课</div>
+  <h1 class="lesson-title">第 13 课 · GRPO 实操 II：损失、训练循环与 15%→47%</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 BRM §6.8–6.12</span>
+    <span class="chip">⏱ 40–50 分钟</span>
+    <span class="chip">🎯 收获：拼出 GRPO 损失 + 标准训练循环，跑出接近官方的推理模型</span>
+  </p>
+</header>
+
+<main>
+
+  <p><strong>为什么学这个：</strong>这是全书的高潮——<b>50 步训练，把 15.2% 的 base 模型变成 47.4% 的推理模型</b>，逼近官方 reasoning 版的 48.2%<span class="cite">BRM table 6.1</span>。而且书的训练循环在你 M1 Pro 的 MPS 上真实可跑（书里自己就演示了 MPS 输出）。</p>
+
+  <!-- ==================== 1 ==================== -->
+  <h2><span class="secno">01</span>阶段四：sequence logprob（sum 不 mean）</h2>
+
+  <p>第 9 课的 <code>avg_logprob_answer</code> 取<b>平均</b>（为了公平比较长短答案）。GRPO 里改成<b>求和</b><span class="cite">BRM §6.8</span>：</p>
+
+<pre><code>def sequence_logprob(model, token_ids, prompt_len):
+    logits = model(token_ids.unsqueeze(0)).squeeze(0).float()
+    logprobs = torch.log_softmax(logits, dim=-1)
+    selected = logprobs[:-1].gather(1, token_ids[1:].unsqueeze(-1)).squeeze(-1)
+    return torch.sum(selected[prompt_len - 1:])   # ← sum，不是 mean</code></pre>
+
+  <p>两个理由<span class="cite">BRM §6.8</span>：① <b>优势是发给整条序列的</b>（一个 rollout 一个 advantage），logprob 就该是整条序列的联合似然，不该按长度摊薄；② 平均会"重新缩放学习信号"，长短回答贡献失衡。<b>注意没有 <code>@inference_mode</code></b>——梯度要能穿过 sum 流回模型参数（输出带 <code>grad_fn=SumBackward0</code>）。</p>
+
+  <p>四个 rollout 的 logprob<span class="cite">BRM §6.8</span>：</p>
+  <table>
+    <thead><tr><th>rollout</th><th>seq logprob</th><th>奖励</th></tr></thead>
+    <tbody>
+      <tr><td><code>\boxed{83}</code>（最短）</td><td>−7.92</td><td>1</td></tr>
+      <tr><td><code>The correct answer is \boxed{83}</code></td><td>−20.15</td><td>1</td></tr>
+      <tr><td><code>The final answer is 83</code></td><td>−16.61</td><td>0</td></tr>
+      <tr><td><code>We get \boxed{38}</code>（错的）</td><td>−23.37</td><td>0</td></tr>
+    </tbody>
+  </table>
+  <p>越长越负（每 token 都在扣分）——<b>sum 版 logprob 隐性偏好简洁回答</b>：同样分数下，模型倾向更短的解法，除非写长能换更高奖励。</p>
+
+  <!-- ==================== 2 ==================== -->
+  <h2><span class="secno">02</span>阶段五：policy gradient 损失</h2>
+
+<pre><code>logps = torch.stack(rollout_logps)                    # [-7.92, -20.15, -16.61, -23.37]
+pg_loss = -(advantages.detach() * logps).mean()       # = -2.576</code></pre>
+
+  <p>三个成分逐一拆<span class="cite">BRM §6.9</span>：</p>
+  <ul>
+    <li><b><code>advantages.detach()</code></b>：优势是"固定的学习信号"，切断它的梯度——只让梯度通过 logprob 更新模型。</li>
+    <li><b>相乘</b>：优势正的 rollout，提高它所有 token 的概率；负的压低。直觉：<code>−A·logp</code> 最小化 ⇔ 高优势回答高概率。</li>
+    <li><b>负号</b>：PyTorch 优化器只会最小化；目标本是最大化（优势加权的 logprob），翻个符号等价换向。</li>
+  </ul>
+
+  <p><code>compute_grpo_loss</code> 把五阶段打包：采样（model.eval()）→ 逐条算奖励和 logprob → 组内标准化优势 → 拼损失，返回 loss、rewards、advantages、samples 一揽子诊断信息<span class="cite">BRM §6.10</span>。</p>
+
+  <!-- ==================== 3 ==================== -->
+  <h2><span class="secno">03</span>阶段六：训练循环（八成是老朋友）</h2>
+
+  <p>循环骨架<b>就是标准 PyTorch 训练循环</b>，唯一的新东西是 stage 4 换成了 GRPO 损失<span class="cite">BRM §6.11</span>：</p>
+
+<pre><code>optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)   # ①
+model.train()
+for step in range(steps):                                     # ②
+    optimizer.zero_grad()                                     # ③
+    stats = compute_grpo_loss(model, tokenizer,
+                              example=math_data[step % len(math_data)],
+                              num_rollouts=4, max_new_tokens=512, ...)  # ④ 新
+    stats["loss_tensor"].backward()                           # ⑤
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)   # ⑥ 梯度裁剪
+    optimizer.step()                                          # ⑦
+    # ⑧ 记录 loss / reward_avg / 平均回答长度 → CSV；每 5 步存 checkpoint
+    #    （Ctrl-C 中断也会先存盘再退出）</code></pre>
+
+  <p>读训练日志的姿势<span class="cite">BRM §6.11</span>：<code>reward_avg=0.5</code> 表示 4 个 rollout 中 2 个对；<b>loss 本身别过度解读</b>——reward_avg=0 的步 loss≈0（零优势），大 loss 只说明组内分化大。要看的是<b>长期趋势</b>：平均奖励升、回答长度变化（R1 论文：训练中回答会自然变长——模型自发学会写中间推理）。</p>
+
+  <div class="callout warn">
+    <span class="co-label">M1 Pro 实跑建议</span>书里这章原生支持 MPS（书即用 MPS 演示）。但 <b>0.6B + 4 rollouts × 512 tokens 在 16GB 内存里很吃紧</b>：先用 <code>num_rollouts=2, max_new_tokens=64</code> 冒烟测试，再逐步加大；OOM 就降这两项。checkpoint 每个 ~1.5GB，勤存盘勤删旧。也可直接下载书作者的预训练 checkpoint 评估（huggingface.co/rasbt/qwen3-from-scratch-grpo-checkpoints）。
+  </div>
+
+  <!-- ==================== 4 ==================== -->
+  <h2><span class="secno">04</span>成绩单与边界</h2>
+
+  <table>
+    <thead><tr><th>模型</th><th>准确率</th><th>平均 tokens</th></tr></thead>
+    <tbody>
+      <tr><td>base（第 5 课基线）</td><td>15.2%</td><td>79</td></tr>
+      <tr><td>官方 reasoning</td><td>48.2%</td><td>1370</td></tr>
+      <tr><td>GRPO 50 步（256 tok × 4 rollouts）</td><td>43.2%</td><td>560</td></tr>
+      <tr><td>GRPO 50 步（512 × 4）</td><td>45.6%</td><td>580</td></tr>
+      <tr><td><b>GRPO 50 步（512 × 8）</b></td><td><b>47.4%</b></td><td>586</td></tr>
+    </tbody>
+  </table>
+  <p style="font-family:var(--sans);font-size:0.8rem;color:var(--ink-soft);margin-top:-0.8rem">表 1 · MATH-500 全集评估（评估时上限 2048 tokens）。<span class="cite">BRM table 6.1</span></p>
+
+  <p>四个读数：</p>
+  <ol>
+    <li><b>50 步就够解锁推理行为</b>——但书作者实测：再训下去不涨反跌，原始 GRPO 长跑不稳定（下一课修）。</li>
+    <li><b>rollout 数量和 token 上限都换得到准确率</b>：2→4→8 rollouts、256→512 tokens，一路涨。训练时的 token 上限塑造了回答长度习惯——所以平均 580 tokens，远短于官方的 1370。</li>
+    <li><b>上限别卡太死</b>：推理需要空间写中间步骤；R1 的经验是回答会越训越长。</li>
+    <li><b>距离官方只差 0.8 分</b>，而差距主要是训练预算（步数、rollouts、token 上限）。</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="co-label">工作决策框架</span>「我们要不要自己 RL 微调」的判断树：任务可自动验证吗（数学/代码/单测）→ 有 base 权重和算力吗（50 步就能 +30 分是极强的信号）→ 不稳定问题能接受吗（需要下一课的工具）。反过来，如果任务不可验证，别硬上 RLVR——那该走 RLHF 或蒸馏（第 15 课）。
+  </div>
+
+  <!-- ==================== 练习 ==================== -->
+  <h2><span class="secno">05</span>检索练习</h2>
+
+  <div class="quiz" data-quiz="mc"></div>
+
+  <div class="takeaway">
+    <span class="tk-label">一句话带走</span>
+    <strong>GRPO 损失 = −mean(优势 × 序列 logprob)：优势定方向，logprob 定幅度，梯度只走 logprob 一侧。外面套一个标准 PyTorch 循环——50 步，15.2%→47.4%。</strong>
+  </div>
+
+  <h2><span class="secno">06</span>接下来</h2>
+
+  <div class="next-steps">
+    <p><span class="ns">📖</span><strong>一手资料</strong>：<a href="https://arxiv.org/abs/2402.03300">DeepSeekMath</a>（GRPO 原文）§4 算法节，对照本课逐行验证你的理解。</p>
+    <p><span class="ns">⏭</span><strong>下一课</strong>：<a href="0014-grpo-improvements.html">GRPO 改进：clipping、KL 正则与格式奖励</a>——ch7：长跑稳定性的三件套（含 DeepSeek-R1 的真实奖励设计）。</p>
+  </div>
+
+  <div class="ask-teacher">
+    💬 <strong>随时问我</strong>：想在 Mac 上真跑一遍训练循环的话，我们可以一起规划配置参数和预期时长。
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0012-grpo-rollouts-and-advantages.html">← 第 12 课</a>
+    <a class="nav-next" href="0014-grpo-improvements.html">第 14 课 →</a>
+  </div>
+
+</main>
+
+<script src="../assets/quiz.js"></script>
+<script>
+window.QUIZZES = {
+  mc: {
+    type: "mc",
+    title: "第 13 课检索练习",
+    questions: [
+      {
+        question: "GRPO 为什么用 sequence-level（求和）而不用平均 logprob？",
+        options: ["求和计算更加快速", "优势发给整条序列不该按长度摊薄", "平均值容易出现下溢", "平均不支持反向传播"],
+        answer: 1,
+        explain: "BRM §6.8：一个 rollout 一个优势，作用于整条序列的联合似然；平均会重新缩放学习信号，让长短回答贡献失衡。"
+      },
+      {
+        question: "pg_loss 中对 advantages 调用 detach() 的原因是？",
+        options: ["节省显存加快训练", "优势是固定信号不该有梯度", "防止优势数值溢出", "让 loss 可以为负数"],
+        answer: 1,
+        explain: "BRM §6.9：梯度只应通过 logprob 流回模型参数；优势作为常量缩放因子被切断。"
+      },
+      {
+        question: "训练循环里唯一「非标准」的环节是？",
+        options: ["优化器 zero_grad", "GRPO 损失的计算", "反向传播 backward", "定期保存 checkpoint"],
+        answer: 1,
+        explain: "BRM §6.11：其余全部是标准 PyTorch 训练循环组件；只有 stage 4 把监督损失换成了 GRPO 损失。"
+      },
+      {
+        question: "sum 版 logprob 给 GRPO 带来的隐性偏好是？",
+        options: ["偏好更长的回答", "偏好更短的回答", "偏好高温度采样", "偏好英文回答"],
+        answer: 1,
+        explain: "BRM §6.8：每加一个 token 就多扣一点分，同等奖励下短回答似然更高——除非写长能换更高奖励。"
+      },
+      {
+        question: "GRPO 训练中 reward_avg=0.0 的步，loss 大约是多少？",
+        options: ["接近零", "大幅为正", "大幅为负", "无法计算"],
+        answer: 0,
+        explain: "BRM §6.11：全错 → 组内奖励无分化 → 优势全零 → 零梯度零更新。loss 别单步解读，看长期趋势。"
+      }
+    ]
+  }
+};
+</script>
+
+</body>
+</html>

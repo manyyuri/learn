@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课程首页 · Build a Reasoning Model (From Scratch)</title>
+<link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+
+<header class="lesson-header">
+  <div class="lesson-kicker">Stateful Teaching Workspace</div>
+  <h1 class="lesson-title">Build a Reasoning Model (From Scratch)<br>中文自学课 · 16 课全</h1>
+  <p class="lesson-meta">
+    <span class="chip">📖 Sebastian Raschka · MEAP V08（全书 8 章）</span>
+    <span class="chip">⏱ 每课 30–45 分钟</span>
+    <span class="chip">💻 实验模型：Qwen3 0.6B（Mac M1 Pro / MPS）</span>
+  </p>
+</header>
+
+<main>
+
+  <p>从"推理模型是什么"出发，亲手实现验证器、采样器、打分器、GRPO 损失与蒸馏循环——每课都扎根书稿原文（标注 <span class="cite">BRM §N.N</span>），配中文测验（检索式练习，先答题再看讲解）。</p>
+
+  <div class="gloss-group">
+    <h3>第一部分 · 认识与基础设施（ch1–3）</h3>
+    <dl>
+      <div class="gloss-item"><dt><a href="lessons/0001-what-is-reasoning.html">0001 · 推理模型是什么</a></dt><dd>工程定义、三大流派、训练管线全景。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0002-load-model-and-generation-loop.html">0002 · 加载模型与生成循环</a></dt><dd>Qwen3 0.6B、贪心解码、生成循环。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0003-kv-cache-and-compile.html">0003 · KV 缓存与 torch.compile</a></dt><dd>5→68 tokens/s 的两步加速。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0004-math-verifier.html">0004 · 数学验证器</a></dt><dd>\boxed 抽取、LaTeX 规范化、SymPy 等价。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0005-eval-harness.html">0005 · 评估 harness</a></dt><dd>MATH-500、base 15.2% / reasoning 48.2%、提示敏感度。</dd></div>
+    </dl>
+  </div>
+
+  <div class="gloss-group">
+    <h3>第二部分 · 推理时算力扩展（ch4–5）</h3>
+    <dl>
+      <div class="gloss-item"><dt><a href="lessons/0006-cot-prompting.html">0006 · CoT 提示</a></dt><dd>一句话提示 15.2%→40.6%，与 8 倍时间账单。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0007-temperature-and-top-p.html">0007 · 温度与 Top-p</a></dt><dd>logits→softmax→采样，多样性的来源。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0008-self-consistency.html">0008 · Self-consistency 投票</a></dt><dd>n=10 多数票 52.0%，全书推理时最佳。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0009-logprob-confidence.html">0009 · Logprob 与置信度</a></dt><dd>概率→logprob，模型知道自己几斤几两吗。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0010-self-refinement.html">0010 · Self-refinement</a></dt><dd>生成→打分→critique→refine；一个诚实的负结果。</dd></div>
+    </dl>
+  </div>
+
+  <div class="gloss-group">
+    <h3>第三部分 · RLVR 与 GRPO（ch6–7）</h3>
+    <dl>
+      <div class="gloss-item"><dt><a href="lessons/0011-rl-primer.html">0011 · RL 零基础入门</a></dt><dd>policy/rollout/奖励/优势，黑话→已知概念映射。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0012-grpo-rollouts-and-advantages.html">0012 · GRPO：rollout 与优势</a></dt><dd>组采样、组内归一化、reward_rlvr。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0013-grpo-loss-and-training-loop.html">0013 · GRPO：损失与训练循环</a></dt><dd>策略梯度 50 步 15.2%→47.4%（M1 实跑指南）。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0014-grpo-improvements.html">0014 · GRPO 三项改进实验</a></dt><dd>裁剪✅ / KL❌崩溃 / 格式奖励⚠被黑。</dd></div>
+    </dl>
+  </div>
+
+  <div class="gloss-group">
+    <h3>第四部分 · 蒸馏与收官（ch8）</h3>
+    <dl>
+      <div class="gloss-item"><dt><a href="lessons/0015-distillation-data-and-sft.html">0015 · 蒸馏 I：数据与 SFT</a></dt><dd>R1 当老师、think 标签、answer-only CE。</dd></div>
+      <div class="gloss-item"><dt><a href="lessons/0016-distillation-eval-and-beyond.html">0016 · 蒸馏 II 与全书收官</a></dt><dd>45% 成绩单、三路线对比、工作应用地图。</dd></div>
+    </dl>
+  </div>
+
+  <div class="lesson-nav">
+    <a href="reference/glossary.html">🗂 术语表（全书完）</a>
+    <a class="nav-next" href="lessons/0001-what-is-reasoning.html">从第 1 课开始 →</a>
+  </div>
+
+</main>
+
+</body>
+</html>

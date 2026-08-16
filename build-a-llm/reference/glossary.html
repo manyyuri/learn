@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>术语表 · Build a LLM From Scratch</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Reference · 术语表</p>
+  <h1>核心术语表</h1>
+  <p class="subtitle">全部 16 课统一使用此表的译法。按主题分组，覆盖全书。</p>
+
+  <p class="sidenote">术语后的 <span style="border:1px solid #a0432d;border-radius:3px;padding:0 .3em;font-size:.7em;color:#a0432d">第N课</span> 表示该术语首次深入讲解的课程；★ 为核心概念，值得反复回顾。</p>
+
+  <h2>一、宏观图景（第 1 课）</h2>
+  <dl class="gloss">
+    <dt id="llm">大型语言模型 <span class="en">(LLM, Large Language Model)</span> <span class="chref">第1课</span></dt>
+    <dd>基于深度神经网络、在海量文本上训练的模型，用来理解和生成人类语言。</dd>
+
+    <dt id="next-token">下一个词预测 <span class="en">(next-token prediction)</span> <span class="chref">第1课 ★</span></dt>
+    <dd>GPT 的核心预训练任务：给定前文，预测接下来的词。所有能力都从这一个任务生长出来。</dd>
+
+    <dt id="self-supervised">自监督学习 <span class="en">(self-supervised learning)</span> <span class="chref">第1课</span></dt>
+    <dd>无需人工标注，用数据自身结构生成标签（"下一个词"即天然标签）。LLM 规模化的根本。</dd>
+
+    <dt id="pretraining">预训练 <span class="en">(pretraining)</span> <span class="chref">第1课 · 第11课实操</span></dt>
+    <dd>在大型未标注语料上训练的第一阶段，产出基础模型。</dd>
+
+    <dt id="foundation-model">基础模型 <span class="en">(foundation model)</span> <span class="chref">第1课</span></dt>
+    <dd>预训练产出的通用模型，一切微调的起点。</dd>
+
+    <dt id="finetuning">微调 <span class="en">(finetuning)</span> <span class="chref">第1课 · 第13/14/16课</span></dt>
+    <dd>在较小有标注数据集上继续训练基础模型，适配具体任务。</dd>
+
+    <dt id="alignment">对齐 <span class="en">(alignment / RLHF)</span> <span class="chref">第1课</span></dt>
+    <dd>用 RLHF/DPO 等方法调整模型行为使其有用、安全。ChatGPT = GPT 底座 + 指令微调 + 对齐。</dd>
+
+    <dt id="transformer">Transformer <span class="en">(Transformer)</span> <span class="chref">第1课</span></dt>
+    <dd>2017 年《Attention Is All You Need》提出的架构（arXiv:1706.03762）。GPT 只用其解码器。</dd>
+
+    <dt id="autoregressive">自回归 <span class="en">(autoregressive)</span> <span class="chref">第1课 · 第10课 ★</span></dt>
+    <dd>用自己生成的输出作为下一步输入，逐词滚动生成。预测 → 拼接 → 重复。</dd>
+  </dl>
+
+  <h2>二、分词与嵌入（第 2–3 课）</h2>
+  <dl class="gloss">
+    <dt id="token">词元 <span class="en">(token)</span> <span class="chref">第1课 · 第2课深入</span></dt>
+    <dd>模型读取文本的最小单元：单词、子词或标点。</dd>
+
+    <dt id="tokenization">分词 <span class="en">(tokenization)</span> <span class="chref">第2课</span></dt>
+    <dd>把文本切成 token 的过程；每个 token 映射为词表中的整数 ID。</dd>
+
+    <dt id="bpe">字节对编码 <span class="en">(BPE, Byte Pair Encoding)</span> <span class="chref">第3课 ★</span></dt>
+    <dd>从字符开始反复合并高频对构建词表的子词算法；GPT-2 词表 50257 个 token，tiktoken 实现。</dd>
+
+    <dt id="embedding">嵌入 / 词嵌入 <span class="en">(embedding)</span> <span class="chref">第2课概念 · 第3课实操</span></dt>
+    <dd>把离散 ID 映射为连续稠密向量的查表操作（nn.Embedding）。GPT-2 中每 token 是 768 维向量。</dd>
+
+    <dt id="pos-embedding">位置嵌入 <span class="en">(positional embedding)</span> <span class="chref">第3课 ★</span></dt>
+    <dd>为每个位置学习的向量，加到词嵌入上注入顺序信息——注意力本身对顺序不敏感。</dd>
+
+    <dt id="sliding-window">滑动窗口 <span class="en">(sliding window)</span> <span class="chref">第3课</span></dt>
+    <dd>把长文本切成定长训练样本的方法。stride=max_length 时窗口不重叠，最省算力。</dd>
+
+    <dt id="special-tokens">特殊词元 <span class="en">(special tokens)</span> <span class="chref">第2课</span></dt>
+    <dd>&lt;|unk|&gt;（未登录词）、&lt;|endoftext|&gt;（文档结束，ID 50256——后被复用为填充符与停止符）。</dd>
+  </dl>
+
+  <h2>三、注意力机制（第 4–6 课）</h2>
+  <dl class="gloss">
+    <dt id="self-attention">自注意力 <span class="en">(self-attention)</span> <span class="chref">第4课 ★</span></dt>
+    <dd>序列中每个词按与其他词的相关度加权聚合信息。三步：打分 → softmax → 加权求和。</dd>
+
+    <dt id="context-vector">上下文向量 <span class="en">(context vector)</span> <span class="chref">第4课</span></dt>
+    <dd>自注意力的输出：融合了全序列信息的加权表示。</dd>
+
+    <dt id="qkv">查询 / 键 / 值 <span class="en">(query, key, value)</span> <span class="chref">第5课 ★</span></dt>
+    <dd>数据库类比：query 提问，key 是索引，value 是内容。q·k 算相关性，对 v 加权求和。</dd>
+
+    <dt id="scaled-dot-product">缩放点积注意力 <span class="en">(scaled dot-product attention)</span> <span class="chref">第5课 ★</span></dt>
+    <dd>Attention(Q,K,V) = softmax(QKᵀ/√d_k)·V。除以 √d_k 防大点积把 softmax 推饱和、梯度消失。</dd>
+
+    <dt id="causal-mask">因果掩码 <span class="en">(causal mask)</span> <span class="chref">第6课 ★</span></dt>
+    <dd>把未来位置注意力得分设为 −∞，softmax 后归零——让 token 只能看过去，保证逐词生成的可训练性。</dd>
+
+    <dt id="dropout">随机失活 <span class="en">(dropout)</span> <span class="chref">第6课</span></dt>
+    <dd>训练时随机置零部分激活（GPT-2 用 0.1）防过拟合；推理时（model.eval()）关闭。</dd>
+
+    <dt id="multi-head">多头注意力 <span class="en">(multi-head attention)</span> <span class="chref">第6课 ★</span></dt>
+    <dd>一次大投影后拆成多个头（768÷12=64 维/头）各自算注意力再拼接——多视角并行。</dd>
+
+    <dt id="register-buffer">缓冲区 <span class="en">(register_buffer)</span> <span class="chref">第6课</span></dt>
+    <dd>随模型保存但不训练的张量（如掩码），随 .to(device) 自动搬家。</dd>
+  </dl>
+
+  <h2>四、GPT 架构（第 8–10 课）</h2>
+  <dl class="gloss">
+    <dt id="layernorm">层归一化 <span class="en">(LayerNorm)</span> <span class="chref">第8课 ★</span></dt>
+    <dd>把每个 token 的激活归一化为均值 0 方差 1，再用可训练 γ/β 缩放平移。稳定深层训练。</dd>
+
+    <dt id="gelu">GELU <span class="en">(Gaussian Error Linear Unit)</span> <span class="chref">第8课</span></dt>
+    <dd>GPT 的平滑激活函数（tanh 近似式），负值有小输出、梯度处处可用，优于 ReLU 的尖角。</dd>
+
+    <dt id="ffn">前馈网络 <span class="en">(FeedForward / FFN)</span> <span class="chref">第8课 ★</span></dt>
+    <dd>逐 token 独立深加工的小网络：768 → 3072 → 768（扩 4 倍再压回）。与注意力分工：词间交流 vs 逐词加工。</dd>
+
+    <dt id="residual">残差连接 / 快捷连接 <span class="en">(residual / shortcut connection)</span> <span class="chref">第8课 ★</span></dt>
+    <dd>x = x + layer(x)：给梯度开高速公路，治深层网络的梯度消失（ResNet 药方）。</dd>
+
+    <dt id="pre-ln">前置层归一化 <span class="en">(Pre-LayerNorm)</span> <span class="chref">第9课</span></dt>
+    <dd>归一化放在子层之前的排布（GPT-2 用），比原始 Post-LN 训练更稳。</dd>
+
+    <dt id="weight-tying">权重绑定 <span class="en">(weight tying)</span> <span class="chref">第9课 ★</span></dt>
+    <dd>输出层复用词嵌入矩阵（都是 [50257, 768]）：163M → 124M。GPT-2 原版设计。</dd>
+
+    <dt id="logits">Logits <span class="en">(logits)</span> <span class="chref">第9课 ★</span></dt>
+    <dd>softmax 前的未归一化得分。GPT 输出 [batch, T, 50257]：每个位置对全词表打分。</dd>
+
+    <dt id="greedy">贪心解码 <span class="en">(greedy decoding)</span> <span class="chref">第10课</span></dt>
+    <dd>永远 argmax 选最大概率词：确定、保守、易重复。softmax 单调故可省略。</dd>
+  </dl>
+
+  <h2>五、训练与解码（第 7、11–12 课）</h2>
+  <dl class="gloss">
+    <dt id="tensor">张量 <span class="en">(tensor)</span> <span class="chref">第7课</span></dt>
+    <dd>多维数组：标量 0 维、向量 1 维、矩阵 2 维……PyTorch 的基本数据容器。</dd>
+
+    <dt id="autograd">自动微分 <span class="en">(autograd)</span> <span class="chref">第7课 ★</span></dt>
+    <dd>对 requires_grad=True 的张量记录计算图；loss.backward() 自动算梯度存入 .grad。</dd>
+
+    <dt id="training-loop">训练循环五步 <span class="en">(training loop)</span> <span class="chref">第7课 ★</span></dt>
+    <dd>zero_grad → forward → loss → backward → step。全书所有训练共用此骨架。</dd>
+
+    <dt id="cross-entropy">交叉熵损失 <span class="en">(cross-entropy loss)</span> <span class="chref">第11课 ★</span></dt>
+    <dd>负的平均对数概率。目标词概率越接近 1 损失越接近 0；ignore_index=-100 可屏蔽指定位置。</dd>
+
+    <dt id="perplexity">困惑度 <span class="en">(perplexity)</span> <span class="chref">第11课</span></dt>
+    <dd>exp(loss)：模型每一步"抓瞎的有效词表大小"。越小越好。</dd>
+
+    <dt id="overfitting">过拟合 <span class="en">(overfitting)</span> <span class="chref">第11课 ★</span></dt>
+    <dd>train loss 降而 val loss 停滞：模型在背诵训练集。第 11 课的教科书级演示。</dd>
+
+    <dt id="adamw">AdamW <span class="en">(AdamW optimizer)</span> <span class="chref">第11课</span></dt>
+    <dd>解耦权重衰减的 Adam 变体（arXiv:1711.05101），LLM 训练标配。</dd>
+
+    <dt id="temperature">温度缩放 <span class="en">(temperature scaling)</span> <span class="chref">第12课 ★</span></dt>
+    <dd>softmax 前 logits 除以 T：T&lt;1 更尖锐（保守），T&gt;1 更平坦（放飞，pizza 时刻）。</dd>
+
+    <dt id="top-k">Top-k 采样 <span class="en">(top-k sampling)</span> <span class="chref">第12课 ★</span></dt>
+    <dd>只保留 logits 最高的 k 个候选（其余 −∞ 归零），再按概率采样——创意加护栏。</dd>
+
+    <dt id="state-dict">状态字典 <span class="en">(state_dict)</span> <span class="chref">第12课</span></dt>
+    <dd>层名 → 参数张量的字典；torch.save/load 的标准载体。续训要连优化器状态一起存。</dd>
+  </dl>
+
+  <h2>六、微调与高效训练（第 13–16 课）</h2>
+  <dl class="gloss">
+    <dt id="class-ft">分类微调 <span class="en">(classification finetuning)</span> <span class="chref">第13课</span></dt>
+    <dd>换 2 维输出头、冻结主干只解冻尾部，训练输出固定类别。专才模型。</dd>
+
+    <dt id="padding">填充 <span class="en">(padding)</span> <span class="chref">第13课</span></dt>
+    <dd>把变长样本补齐到等长（token ID 50256），批处理的前提。</dd>
+
+    <dt id="alpaca">Alpaca 提示样式 <span class="en">(Alpaca prompt style)</span> <span class="chref">第14课</span></dt>
+    <dd>### Instruction / ### Input / ### Response 三段式指令模板（斯坦福 Alpaca 首创）。</dd>
+
+    <dt id="collate">整理函数 <span class="en">(collate function)</span> <span class="chref">第14课 ★</span></dt>
+    <dd>把样本列表组装成批的函数；指令微调自定义 collate：按批内最长 pad + 目标中 -100 屏蔽。</dd>
+
+    <dt id="llm-judge">LLM 评审 <span class="en">(LLM-as-judge)</span> <span class="chref">第14课</span></dt>
+    <dd>用另一个 LLM（如 Llama 3）给生成回答打分（0–100）的自动评估法（AlpacaEval 思路）。</dd>
+
+    <dt id="warmup">学习率预热 <span class="en">(learning rate warmup)</span> <span class="chref">第15课</span></dt>
+    <dd>前 N 步（总步数 0.1%–20%）从极小 lr 线性爬升到峰值，防开局大更新。</dd>
+
+    <dt id="cosine-decay">余弦衰减 <span class="en">(cosine decay)</span> <span class="chref">第15课</span></dt>
+    <dd>预热后学习率沿半余弦周期平滑降到 min_lr，防后期震荡越过最小值。</dd>
+
+    <dt id="grad-clip">梯度裁剪 <span class="en">(gradient clipping)</span> <span class="chref">第15课</span></dt>
+    <dd>梯度 L2 范数超阈值（常用 1.0）就等比例缩小——方向不变、长度受限。backward 后、step 前。</dd>
+
+    <dt id="lora">低秩适应 <span class="en">(LoRA, Low-Rank Adaptation)</span> <span class="chref">第16课 ★</span></dt>
+    <dd>W' = W + BA：冻结 W，只训小矩阵对（r≪d）。参数省 ~50 倍，推理可零开销合并（arXiv:2106.09685）。</dd>
+
+    <dt id="rank">秩 <span class="en">(rank, r)</span> <span class="chref">第16课</span></dt>
+    <dd>LoRA 的核心超参：A/B 的内部维度，表达力与参数量的旋钮（书用 r=16，alpha=16）。</dd>
+  </dl>
+
+  <p style="margin-top:2.5em"><a href="../lessons/index.html">← 返回课程导航</a></p>
+
+  <footer>
+    <p>Build a LLM From Scratch · 参考文档 · 依据《Build a Large Language Model (From Scratch)》(Sebastian Raschka, Manning) 编制</p>
+  </footer>
+</main>
+</body>
+</html>
