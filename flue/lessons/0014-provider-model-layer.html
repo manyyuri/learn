@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 14 课 · provider 与模型层细节</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 14 课 · flue 架构深潜 · 阶段④ 进阶扩展</p>
+  <h1>provider 与模型层细节：Models 单例、usage 归一化、诊断通道</h1>
+  <p class="subtitle">读完这一课，你能说出模型层三个内部件的分工——运行时怎么持有/注册 provider、pi-ai 的 usage 怎么被归一化、provider 边界的信息怎么穿透到观测——并据此排障。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 13 课。",
+      "questions": [
+        {
+          "q": "flue 依赖 pi 家族哪两个包？",
+          "options": ["agent 与 coding-agent", "pi-ai 与 pi-agent-core", "client 与 server 两个包", "ai 与 tui 两个包"],
+          "answer": 1,
+          "explain": "pi-ai（模型层）+ pi-agent-core（agent 核心）。"
+        },
+        {
+          "q": "pi-agent-core 给 flue 什么？",
+          "options": ["完整的 loop 实现", "消息与工具的纯类型", "会话持久化引擎", "终端渲染组件"],
+          "answer": 1,
+          "explain": "import 全是 type。"
+        },
+        {
+          "q": "flue 复用 pi-ai 的哪部分？",
+          "options": ["render 与帧机制", "provider 与流式运输", "durability 的受理", "vite 打包变换"],
+          "answer": 1,
+          "explain": "provider/transport/usage 是 pi-ai 的。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>Models 单例：模块级、按 id 替换</h2>
+  <p>运行时持有一个<b>模块作用域的 pi-ai <code>Models</code> 实例</b>（<code>createModels()</code>），由 <code>app.ts</code> 与生成的服务入口在模块初始化时填充。四个操作：</p>
+  <ul>
+    <li><code>setProvider(provider)</code>——注册一个 pi-ai provider；<b>每次调用替换同 id 的前一个，不累积</b>。任何 Provider 都行：内置工厂、<code>createProvider(...)</code>、测试假 provider。Cloudflare 上在 app.ts 注册 <code>cloudflare</code> provider 会压过生成的 Workers AI 默认。</li>
+    <li><code>hasProvider(id)</code>——查是否已注册。</li>
+    <li><code>getRuntimeModels()</code>——内部取用（Session 的流式/补全调用）。</li>
+    <li><code>resetModelsForTests()</code>——整体换新（仅测试）。</li>
+  </ul>
+  <p>凭证走每个 provider 自己的 <code>auth</code> 声明：Node 读 env，Cloudflare 经 <code>nodejs_compat</code> 的 <code>process.env</code>。<br>
+  <span class="cite">runtime/src/runtime/providers.ts</span></p>
+
+  <div class="sidenote">「模块级单例」解释了 0011 课 run-bootstrap 为什么费劲保证「同一份磁盘拷贝」——两副本会各自持一个 Models 实例，provider 注册被静默拆散。</div>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>内置 provider 注册：把 pi 的导出名挡在生成代码外</h2>
+  <p>生成的 server 入口注册内置 provider 时，是从 <code>@earendil-works/pi-ai/providers/&lt;id&gt;</code> 模块命名空间里<b>挑出工厂</b>再注册——注释道破原因：这样 pi 的精确导出名（<code>anthropicProvider</code>、<code>azureOpenAIResponsesProvider</code>…）就不进生成代码，<b>pi 改名不会从生成代码底下漂走</b>。这也呼应 0004 课 <code>flue({providers:[...]})</code> 的穷尽式列表——列表只决定「生成代码 import 哪些 namespace」。<br>
+  <span class="cite">runtime/src/runtime/builtin-providers.ts</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>usage 归一化：解耦才是目的</h2>
+  <p><code>usage.ts</code> 的注释直白：把 pi-ai 的 <code>Usage</code> 转成 flue 公开的 <code>PromptUsage</code>。「两者今天结构相同，但走归一化让 flue 的公开类型与 pi-ai 解耦——pi-ai 未来加字段不会漏进 runtime 的公开面」。内部工具：</p>
+  <ul>
+    <li><code>emptyUsage()</code>——全零（加法单位元）。</li>
+    <li><code>addUsage(a,b)</code>——逐字段求和，含嵌套 cost；返回新对象不改入参。</li>
+    <li><code>fromProviderUsage(u)</code>——pi-ai Usage → flue PromptUsage；输入 undefined 返回 undefined。</li>
+  </ul>
+  <p>这些被 <code>prompt()</code>/<code>skill()</code>/<code>task()</code>/compaction 用来把 token + cost 数字<b>逐调用聚合</b>，compaction 持久化路径在落 canonical 压缩记录前先归一化。<br>
+  <span class="cite">runtime/src/usage.ts</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>诊断通道：provider 归一化丢了什么，就补什么</h2>
+  <p><code>provider-diagnostics.ts</code> 的存在理由值得整段读：provider 会归一化它们收到的东西——原始 SSE <code>finish_reason</code> 变成 pi-ai <code>stopReason</code>、响应头被读后丢弃、body 被摊平成 <code>errorMessage</code> 散文。于是每次观测需要某个「归一化前的值」时，就冒出临时通道（消息字符串标记、对散文跑正则）。这个文件是响应路径唯一官方替代：</p>
+  <blockquote>在归一化边界，别丢归一化前的值——把它挂在这里，经显式 allowlist 投影到观测。</blockquote>
+  <ul>
+    <li><b>运输</b>是 pi-ai 自己的扩展点：<code>AssistantMessage.diagnostics</code> 随消息走，复制不丢、无需旁路通道。</li>
+    <li><b>投影有 allowlist</b>：<code>ProviderResponseDiagnostics</code> 只列少数字段（归一化前的 <code>providerFinishReason</code>、Cloudflare 网关日志 id <code>cf-aig-log-id</code>…），会话只把这些投影到 <code>turn</code> 观测——<b>绝不任意带 headers/payload（可能含凭证）</b>。</li>
+    <li><b>纯遥测</b>：不参与重放、执行身份、归一化的 stopReason/finishReason 契约。</li>
+    <li><b>抛错路径</b>（请求在出消息前就死）用不了这通道，仍靠消息标记如 <code>RETRYABLE_INTERRUPTION_MARKER</code>——直到 pi-ai 长出结构化错误字段。</li>
+  </ul>
+  <span class="cite">runtime/src/provider-diagnostics.ts</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>元数据驱动的语义闭环（回顾 + stylist 复盘）</h2>
+  <p>0004 课讲过 catalog 条目带元数据，现在能补全「谁消费它」：<code>contextWindow</code> → 阈值 compaction 触发点；<code>reasoning</code> → thinkingLevel 是否上 wire（false 则静默丢弃）；<code>input</code> → 能否收图（无则图换 "(image omitted)" 占位）；<code>cost</code> → usage 聚合计价。stylist 注册表里那几行不是摆设——<code>reasoning:false</code>（DeepSeek 关 thinking 提速）、<code>contextWindow:1_048_576</code>、vision <code>input:['text','image']</code> 直接决定它 agent 的 compaction 与多模态行为。<br>
+  <span class="cite">guide/models.md · stylist-agent/flue/src/app.ts（baseModel）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>排障语义：错误发生在哪层</h2>
+  <ul>
+    <li><code>Provider is not configured: anthropic</code>——Models 单例里没这个 id 的 provider（没配密钥 / providers 穷尽列表没含它 / 没 setProvider 自定义）。</li>
+    <li>未知 specifier —— 请求发出前 <b>fail fast</b>，报 unresolved provider + model id。</li>
+    <li>瞬时 provider 错误（限流/宕机）——退避重试 turn，走 0009 的错误预算。</li>
+  </ul>
+  <span class="cite">guide/models.md · flue skill（实测错误原文）· 0009 §2</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "setProvider 同名注册会怎样？",
+          "options": ["两个 provider 并存", "替换同 id 前一个", "抛重复注册错误", "静默忽略新注册"],
+          "answer": 1,
+          "explain": "每次调用替换同 id 的前一个，不累积。"
+        },
+        {
+          "q": "usage 归一化的目的是？",
+          "options": ["让数值看起来更大", "公开类型与 pi-ai 解耦", "压缩数据库存储", "绕过 provider 计价"],
+          "answer": 1,
+          "explain": "归一化让 pi-ai 未来加字段不漏进 flue 公开面。"
+        },
+        {
+          "q": "诊断值如何传到观测？",
+          "options": ["任意附带头字段", "经显式 allowlist 投影", "直接写进响应正文", "落到数据库表里"],
+          "answer": 1,
+          "explain": "只把 allowlist 字段投影到 turn 观测，防凭证泄漏。"
+        },
+        {
+          "q": "thinkingLevel 何时被静默丢弃？",
+          "options": ["模型窗口太小的时候", "catalog 标记非 reasoning", "key 过期的时候", "沙箱未挂载的时候"],
+          "answer": 1,
+          "explain": "只有 reasoning-capable 模型 thinking 才上 wire；否则静默丢。"
+        },
+        {
+          "q": "模型 catalog 的元数据不驱动什么？",
+          "options": ["compaction 触发阈值", "thinking 是否上 wire", "能否接收图片输入", "路由挂载的路径"],
+          "answer": 3,
+          "explain": "路由挂载是 app.ts 显式决定，与模型元数据无关。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：模型层 = 模块级 Models 单例（setProvider 按 id 替换）+ usage 归一化解耦 + diagnostics allowlist 通道三件套；元数据驱动 compaction/thinking/模态，错误三层分诊（未配置 / 未解析 / 瞬时）。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 15 课「Channels：事件入口」</strong><br>
+  把平台事件（Slack/Teams/Discord/GitHub…）验证后送进 agent 会话——verified ingress、channel 路由、provider SDK 模式，以及它和 dispatch 的关系。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你那句 Provider is not configured 出现的上下文、或想给 opencode-luna 的模型补 reasoning 元数据——回来对 §1/§5。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 14 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>runtime/src/runtime/providers.ts</code> · <code>usage.ts</code> · <code>provider-diagnostics.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

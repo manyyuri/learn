@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 10 课 · subagents 与委派</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 10 课 · flue 架构深潜 · 阶段② 持久与执行</p>
+  <h1>subagents 与委派：干净上下文里的专注工作</h1>
+  <p class="subtitle">读完这一课，你能讲清委派的三步机制、delegate 继承什么/隔离什么、为什么委派深度封顶 4 层——以及工具/技能/子代理三种原语何时选谁。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 9 课。",
+      "questions": [
+        {
+          "q": "被受理提交的终态有几种？",
+          "options": ["只有完成一种终态", "完成失败与中止三种", "成功与排队两种状态", "只有失败一种结果"],
+          "answer": 1,
+          "explain": "completed/failed/aborted 恰好一个，写进 settled 记录。"
+        },
+        {
+          "q": "stylist 覆盖 durability 为什么？",
+          "options": ["降预算快速失败重试", "提高预算扛住长活", "关掉全部重试机制", "换成每会话双 owner"],
+          "answer": 0,
+          "explain": "3 次/5 分钟——购物建议宁可快速失败让用户重试。"
+        },
+        {
+          "q": "中断的普通工具调用如何收场？",
+          "options": ["静默跳过不再管", "settle 成 unknown 错误", "自动转 durable 重跑", "回滚到调用之前"],
+          "answer": 1,
+          "explain": "不知副作用做过没，不重跑，显式错误给模型。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>声明：useSubagent 三要素</h2>
+  <p>委派对象叫 <b>subagent</b>——一个命名的 delegate，agent 可把专项工作交给它。定义三个必填字段：<code>name</code>、<code>description</code>、<code>agent</code> 函数。<code>description</code> 是父模型决定要不要委派时读的那行——像写好的工具描述一样写清楚「干什么 + 何时用」。</p>
+  <pre><code>function Summarizer() {
+  return 'You summarize support cases in three sentences.';
+}
+export function CaseAgent() {
+  useModel('anthropic/claude-sonnet-4-6');
+  useSubagent({ name: 'summarizer', description: 'Summarizes one support case.', agent: Summarizer });
+  return 'Investigate the case. Delegate the summary to the `summarizer` subagent.';
+}</code></pre>
+  <p>关键：<code>Summarizer</code> <b>故意不 export</b>。delegate 的 agent 函数不是已注册 agent——没有 useModel、没有会话 id、没有 HTTP 面，只作为挂载它的 agent 的一种能力存在（构建会注册每个 <b>exported</b> 大写函数为顶层 agent）。delegate 可条件挂载；同名两个在一个 render 里挂 = 抛错。<br>
+  <span class="cite">guide/subagents.md（Declaring a subagent）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>委派三步：task 工具驱动</h2>
+  <p>委派是模型驱动的。每个 agent 工具集都含框架自有的 <code>task</code> 工具；声明的 delegate 按 name+description 进系统提示的 Available Agents 段。模型判断合适 → 调 <code>task</code>（delegate 名 + 一段 prompt）：</p>
+  <ol>
+    <li>runtime <b>在委派时、独立帧里渲染</b> delegate 的 agent 函数 → 得子代理的指令/工具/技能。</li>
+    <li>子代理作为<b>detached 会话</b>在父环境里跑：读任务 prompt、用自己上下文窗口、跑完。</li>
+    <li><b>只有子代理的最终消息</b>作为 task 工具结果回父——中间推理、工具调用、读文件统统不进父会话。</li>
+  </ol>
+  <p>task 工具永远在，但它的 <code>agent</code> 参数只解析已声明的 delegate——没挂 useSubagent 的 agent 没有合法值可传，委派不了。可传可选 <code>cwd</code> 把子代理指到别的目录、可按 attachment id 转发图。<br>
+  <span class="cite">guide/subagents.md（How delegation works）</span></p>
+
+  <div class="sidenote">两个推论要刻进去：①<b>prompt 就是全部简报</b>——子代理看不到父会话，任务 prompt 必须自包含；②<b>task 并行</b>——一个批里的工具调用并行执行，五个独立检查 = 五个并发子会话，各占各的窗口。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>继承什么、隔离什么</h2>
+  <p>delegate 默认与父<b>隔离</b>，只继承父的<b>环境</b>：沙箱与 harness 工具、工作区上下文（AGENTS.md / workspace skills）、父的模型与 reasoning（可覆盖）。<b>不继承</b>父的对话：历史、指令、工具、技能、子代理、持久状态、initialData 全不继承。</p>
+  <p>父子的右侧世界只来自 delegate 自己的 render。因为共享沙箱，<b>文件是天然交接面</b>：Reproducer 写 report.md，父在 task 返回后读。delegate 渲染里 <code>useTool/useSkill/useInstruction</code>/自定义 hook/嵌套 useSubagent 照常；实例作用域 hooks 抛错：<code>usePersistentState()</code>、<code>useSandbox()</code>、<code>useModel()</code>，以及客户端向的 useDataWriter / 事件 hooks / useDispatchMessage。</p>
+  <p>两个覆盖字段：<code>model</code>（delegate 的模型，省略继承父）、<code>thinkingLevel</code>。delegate 换便宜模型是常见模式——每票都跑的归类步骤不需要父的模型。<br>
+  <span class="cite">guide/subagents.md（What a subagent inherits）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>委派深度、持久与内置 GeneralSubagent</h2>
+  <ul>
+    <li><b>嵌套与深度</b>：delegate 可再声明自己的 delegate（嵌套 useSubagent），runtime 封顶 <b>4 层委派深度</b>。</li>
+    <li><b>崩溃恢复</b>：子会话写自己的持久记录，任务被打断/重部署从断处续——恢复时重挂到子转录续跑（第 9 课 §5）。</li>
+    <li><b>GeneralSubagent</b>：flue 内置的空白 delegate，挂在保留名 <code>flue-general</code> 下。agent 函数故意空——子代理只有共享环境（沙箱工具、工作区上下文、父模型），无自己的指令/工具/技能，一切靠任务 prompt 简报。它也是 opt-in：想让它能 fan out 就显式挂。</li>
+    <li><b>defineSubagent</b>：像 defineTool/defineSkill——在普通模块里定义一次并 export 共享，模块加载时校验（而非首 render），返回冻结对象；挂载时 per-mount 覆盖干净铺开（如给高频 agent 的 classifier 配小模型）。</li>
+  </ul>
+  <span class="cite">guide/subagents.md（The general-purpose delegate / Share a subagent）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>工具 vs 技能 vs 子代理：选型</h2>
+  <p>subagent 最有用时：探索性工作会淹没父上下文但产出很短（研究/代码库探索/日志分析）；工作流某阶段要不同的指令/工具/技能；独立工作可并行各占窗口；某类活要不同模型。对照邻居：</p>
+  <ul>
+    <li><b>工具</b>：你应用代码执行的<b>有界函数</b>——工作确定性、非模型驱动时用它。</li>
+    <li><b>技能</b>：给<b>当前 agent</b> 加指令与资源——需要指导而非隔离时用它。</li>
+    <li><b>子代理 ≠ 第二个注册 agent</b>：无会话 id、无持久状态、无地址。想让系统的另一方长期给一个 agent 发消息——注册真 agent 用 dispatch。</li>
+  </ul>
+  <span class="cite">guide/subagents.md（When to use a subagent）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "子代理的最终消息以什么形式回父？",
+          "options": ["作为 task 工具的结果", "追加进父会话历史里", "写进父持久状态字段", "作为独立 assistant 消息"],
+          "answer": 0,
+          "explain": "只有最终消息作为 task 工具结果返回；中间过程不进父会话。"
+        },
+        {
+          "q": "delegate 继承父的哪一部分？",
+          "options": ["完整对话历史记录", "环境与默认模型", "父的持久状态值", "父的初始创建数据"],
+          "answer": 1,
+          "explain": "继承环境（沙箱/工作区/父模型），隔离对话（历史/指令/状态全不继承）。"
+        },
+        {
+          "q": "委派深度封顶几层？",
+          "options": ["最多两层嵌套委派", "最多四层委派深度", "完全没有任何限制", "只允许一层的委派"],
+          "answer": 1,
+          "explain": "runtime 把委派深度封顶在 4 层。"
+        },
+        {
+          "q": "delegate 渲染里哪个 hook 抛错？",
+          "options": ["useTool 与 useSkill", "usePersistentState 状态", "useInstruction 指令", "自定义的 use 开头函数"],
+          "answer": 1,
+          "explain": "实例作用域 hooks（持久状态/沙箱/模型 + 客户端向 hooks）在 delegate 帧抛错。"
+        },
+        {
+          "q": "想长期给一个 agent 发消息该用？",
+          "options": ["挂 GeneralSubagent 委派", "注册真 agent 用 dispatch", "每个 task 都内联定义", "只靠模型指令记住"],
+          "answer": 1,
+          "explain": "subagent 不是地址化 agent；长期对话用注册的 agent + dispatch。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：委派 = task 工具（常驻）+ delegate 名 → 独立帧渲染子代理 → detached 会话跑 → 最终消息回父。记住「prompt 即简报、并行任务、4 层深度、继承环境隔离对话」这五句话，就能设计出干净的 fan-out。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 11 课「运行时与部署」</strong><br>
+  收束阶段②：把六层塔的 L6 打开——CLI flue run 引导、HTTP 挂载（routing/handle-agent）、dispatch 与队列、start()/init() 编程入口、SDK 怎么消费已部署会话。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你想给 stylist 加个"照片评审子代理"却卡在"delegate 看不到父会话"——回来用 §3 的继承/隔离对一下边界。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 10 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/subagents.md</code> · <code>runtime/src/hooks/use-subagent.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

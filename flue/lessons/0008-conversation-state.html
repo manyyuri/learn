@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 8 课 · 会话与状态</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 8 课 · flue 架构深潜 · 阶段② 持久与执行</p>
+  <h1>会话与状态：append-only 流里的三种记录</h1>
+  <p class="subtitle">读完这一课，你能说清会话数据库到底存了什么、usePersistentState 为什么靠"record log"就能跨重启存活、以及 Headroom 的 Postgres 选型到底在买什么。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 7 课。",
+      "questions": [
+        {
+          "q": "local() 的 shell 默认拿到什么？",
+          "options": ["全部宿主环境变量", "一小撮白名单变量", "包含 API 密钥的变量", "进程启动时的快照"],
+          "answer": 1,
+          "explain": "白名单小集合，secrets 逐变量 opt-in。"
+        },
+        {
+          "q": "沙箱 presence 在何时被读取？",
+          "options": ["渲染中途任意时刻", "初始化与每个 turn 边界", "只有会话创建时一次", "每次工具调用时刻"],
+          "answer": 1,
+          "explain": "presence 在初始化与 turn 边界读，翻转换环境不中途换。"
+        },
+        {
+          "q": "内存虚拟沙箱的特质？",
+          "options": ["隔离宿主且会易逝", "绑定宿主真文件系统", "自动持久化会话", "默认开放全部网络"],
+          "answer": 0,
+          "explain": "内存 + 模拟 bash，隔离、易逝、网络 opt-in。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>会话数据库存什么（和不存什么）</h2>
+  <p>flue 的数据库存 <b>运行时自己的持久状态</b>，不是你的业务数据。三类记录：</p>
+  <table>
+    <tr><th>记录</th><th>内容</th><th>谁读它</th></tr>
+    <tr><td><b>canonical conversations</b></td><td>每个会话一条<b>append-only 流</b>：用户消息、助手输出、工具调用与结果、compaction、恢复事实</td><td>后续每 turn、每个重连客户端、每次崩溃恢复都靠读回它重建画面——<b>单一真相源</b></td></tr>
+    <tr><td><b>accepted submissions</b></td><td>受理的输入 + 谁在处理它的 claims/leases</td><td>受理即持久，中断后可恢复而不是静默丢</td></tr>
+    <tr><td><b>persisted state</b></td><td>每条 usePersistentState 写入</td><td>状态跨重启活到会话结束</td></tr>
+  </table>
+  <p>附件 payload（图等）以不可变记录存在流旁，被流引用。<b>数据库不管</b>：沙箱文件与依赖、外部 API 副作用、provider 凭证、你的业务数据。可持久数据库 ≠ 可持久沙箱，可持久工作区也不保会话史。<br>
+  <span class="cite">guide/database.md（What Flue stores）· guide/durability.md</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>为什么是 append-only 流 + 投影</h2>
+  <p>把对话设计成「只追加的记录流」而非「可变状态表」，换来三件事：</p>
+  <ul>
+    <li><b>重放即重建</b>：崩溃后没有任何"半写坏"的会话——读回流就能收敛到一致画面；客户端重连也从流重建。</li>
+    <li><b>审计可追溯</b>：每个 turn 的每条记录都在，工具调用结果、恢复事实不丢。</li>
+    <li><b>投影给客户端</b>：运行时的 <code>conversation-*</code>（reader/projections/public）把流减成客户端事件流——逐块文本、工具事件、数据 parts、元数据实时推出（SDK 的 observe、HTTP 长连接读的就是它）。</li>
+  </ul>
+  <span class="cite">runtime/src/conversation-reader.ts / conversation-projections.ts / conversation-public.ts · guide/database.md</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>usePersistentState 的真相：record log 上的 API</h2>
+  <p>源码注释说得直白：它是<b>agent 实例 record log 之上的 API</b>——每条写入都是一条 <code>state_write</code> 记录进 canonical 流，这正是状态能跨重启活到会话结束的原因。</p>
+  <ul>
+    <li><b>读是渲染快照</b>：本渲染把实例的 state_write 记录 reduce 成当前值。同一渲染内两次读到的旧值，想基于最新写就用 updater 函数。</li>
+    <li><b>写是静默的</b>：不 post 消息、不 wake agent、不中途重渲染——下个 turn 的渲染读最新。</li>
+    <li><b>写入与「做出它的那单位工作」原子提交</b>：工具里的写入跟那个 turn 的工具批一起提交；若该批被恢复判为中断，写入=没发生。这正是它当 at-least-once 守卫的原因：<code>sent</code> 标志不会在它守卫的邮件回滚后还是 true。</li>
+    <li>值须 JSON 可序列化；按 name 键控；声明可条件化（缺席只是没碰，不违规）。</li>
+  </ul>
+  <span class="cite">runtime/src/hooks/use-persistent-state.ts · guide/agent-hooks.md（Persisted state）· guide/durability.md（Persisted state）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>存储选型：从内存默认到 Postgres</h2>
+  <table>
+    <tr><th>情形</th><th>行为</th></tr>
+    <tr><td>无 db.ts（内存 SQLite 默认）</td><td>一切正常但<b>重启全丢</b>——只够开发/一次性 agent</td></tr>
+    <tr><td><code>vite dev</code></td><td>缓存文件 <code>node_modules/.cache/flue/dev.db</code>——代码重载不丢，dev server 冷启动重置</td></tr>
+    <tr><td><code>flue run</code></td><td>缓存文件 <code>node_modules/.cache/flue/run.db</code>——<b>永不重置</b>，所以 <code>--id</code> 能跨调用续对话</td></tr>
+    <tr><td><code>sqlite('./data/flue.db')</code></td><td>内置 node:sqlite，WAL 模式，单宿主跨重启存活</td></tr>
+    <tr><td>生态适配器</td><td>postgres/libsql/mysql/mongo/redis 等，bring-your-own-driver</td></tr>
+    <tr><td>Cloudflare</td><td>无需配置——每个会话是 Durable Object + 自带 SQLite（有 db.ts 直接构建报错）</td></tr>
+  </table>
+  <span class="cite">guide/database.md（The in-memory default / sqlite() / Choosing a database）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>db.ts：按约定的入口模块</h2>
+  <p>源目录（<code>.flue/</code> → <code>src/</code> → 项目根）放 <code>db.ts</code> 默认导出适配器即可——<code>vite dev/build</code>、<code>flue run</code> 都按约定解析并启动时连接。适配器是普通 TS，可从环境读连接串、建驱动池。启动时先 <code>migrate()</code>（幂等建表/验表、盖格式版本——不兼容版本的库<b>拒绝启动</b>而非损坏），再 <code>connect()</code>——数据库不可达会在<b>启动时</b>失败，而不是第一次对话中途。<code>start()</code> 脚本不走构建、不吃 db.ts——直接传 adapter 给 <code>db</code> 选项。<br>
+  <span class="cite">guide/database.md（The db.ts entry module）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>Headroom 复盘：Postgres 在买什么</h2>
+  <p>Headroom 用 <code>@flue/postgres</code>，driver 自己用 <code>pg</code> Pool 包：适配器实现 flue 存储契约，但<b>从不替你挑/绑/配 driver</b>——你给它 <code>query/transaction/close</code> 三个函数，保留对驱动、池化、TLS、凭证的完全控制。blueprint（<code>flue add database postgres</code>）会生成完整 db.ts。</p>
+  <p>买到的能力：状态在宿主机损失/多 replica 下仍活、替换进程能恢复 accepted work。<b>买不到的</b>：active-active 扩展——共享库让"替换进程"恢复，但每个会话同一时刻仍要<b>恰好一个 Node owner</b>，多副本要把每个会话路由到单一 owner。<br>
+  <span class="cite">guide/database.md（Ecosystem adapters / Choosing a database）· Headroom 项目（@flue/postgres + pg）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "会话的单一真相源是什么？",
+          "options": ["应用自己的业务数据库", "append-only 的会话记录流", "客户端缓存的对话状态", "内存里的可变状态表"],
+          "answer": 1,
+          "explain": "canonical conversation = append-only 记录流；每 turn/重连/恢复都靠读回它重建。"
+        },
+        {
+          "q": "flue 的数据库不存哪类数据？",
+          "options": ["会话记录的流内容", "沙箱里的文件内容", "受理过的提交记录", "持久状态的每条写入"],
+          "answer": 1,
+          "explain": "不存沙箱文件/依赖、外部副作用、凭证、你的业务数据。"
+        },
+        {
+          "q": "持久状态靠什么跨重启存活？",
+          "options": ["每次写回应用数据库", "record log 的 state 记录", "浏览器本地存储缓存", "进程退出前序列化"],
+          "answer": 1,
+          "explain": "每条写入是 canonical 流里的 state_write 记录，reduce 成渲染快照。"
+        },
+        {
+          "q": "flue run 默认把会话存哪？",
+          "options": ["内存里每次重建", "缓存 run.db 永不重置", "项目根 data 目录", "系统级全局数据库"],
+          "answer": 1,
+          "explain": "node_modules/.cache/flue/run.db，永不重置——--id 能跨调用续对话。"
+        },
+        {
+          "q": "共享数据库能买到什么？",
+          "options": ["active-active 双活扩展", "替换进程恢复已受理工作", "同一会话多 owner 并发写", "免掉沙箱持久化问题"],
+          "answer": 1,
+          "explain": "共享库让替换进程恢复 work、副本共享状态；但每会话仍要单一 owner，不能双活。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：会话 = append-only 流（三类记录）；状态 = 流里的 state_write；「存储选型 = 换 db.ts 适配器」三句话能讲清。选型买的是「宿主/副本挂了还能恢复」，买不到并发双活。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 9 课「durability：接受的工作绝不丢」</strong><br>
+  本课地图里的第 ② 步现在放大：submission 受理契约、恢复两阶段、attempt 与重试预算、tool-batch 修复、Node lease vs Cloudflare DO 唤醒——stylist 的 durability 配置在这课彻底讲清。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如 Headroom 的 pg 迁移、run.db 在哪、或你哪次"重启后对话没了"——多半是没配 db.ts，回 §4 表对号入座。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 8 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/database.md</code> · <code>runtime/src/conversation-*.ts</code> · <code>runtime/src/hooks/use-persistent-state.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

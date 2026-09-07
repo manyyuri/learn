@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 11 课 · 运行时与部署</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 11 课 · flue 架构深潜 · 阶段② 持久与执行</p>
+  <h1>运行时与部署：四种入口，一条 durable 管线</h1>
+  <p class="subtitle">读完这一课，你能把六层塔的 L6 打开：CLI / HTTP / dispatch / init·start 四种入口怎么殊途同归到同一条 submission 管线，以及 conversation URL + SDK 是怎么消费部署态的。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 10 课。",
+      "questions": [
+        {
+          "q": "子代理最终消息以什么形式回父？",
+          "options": ["追加成父会话消息", "作为 task 工具结果", "写进父持久状态", "另开一条流推送"],
+          "answer": 1,
+          "explain": "只有最终消息作为 task 工具结果回父。"
+        },
+        {
+          "q": "delegate 继承父的哪部分？",
+          "options": ["完整会话历史", "环境与默认模型", "父的持久状态", "父的 initialData"],
+          "answer": 1,
+          "explain": "继承环境，隔离对话。"
+        },
+        {
+          "q": "委派深度封顶几层？",
+          "options": ["两层嵌套上限", "四层委派深度", "完全没有限制", "只允许一层委派"],
+          "answer": 1,
+          "explain": "嵌套 useSubagent 封顶 4 层。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>一个论断：入口多样，管线唯一</h2>
+  <p>0001 地图说过：入口五花八门，但都走同一条 agent + durability API，区别只在「运行时怎么起、有没有 HTTP 服务器」。四种入口：</p>
+  <table>
+    <tr><th>入口</th><th>场景</th><th>怎么起</th></tr>
+    <tr><td><b>CLI</b> <code>flue run</code></td><td>本地直接跑一个 agent 模块</td><td>不起服务器、不构建应用；对话跨运行持久</td></tr>
+    <tr><td><b>HTTP</b>（createAgentRouter 挂载）</td><td>部署态服务对话</td><td>POST 即发即收（202），回复从 GET/流读</td></tr>
+    <tr><td><b>dispatch()</b></td><td>异步事件进 agent（webhook/队列/chat）</td><td>接受异步处理，立即返回回执</td></tr>
+    <tr><td><b>start() / init()</b></td><td>自己 Node 进程内引导（cron/脚本/测试）</td><td><code>start({agents, db})</code> boot 运行时 → <code>init</code> 拿句柄</td></tr>
+  </table>
+  <span class="cite">guide/building-agents.md（Interacting with your agent）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>HTTP 挂载：app.ts 是路由图</h2>
+  <p>flue <b>从不自动挂载 agent</b>。注册（'use agent' 扫描）让 agent 在应用里可寻址；HTTP 服务是你在 <code>app.ts</code> 路由图里的<b>显式决定</b>。默认导出就是服务器——每个 agent/channel/自定义路由都在那显式挂载，不从文件名/目录约定生成。</p>
+  <pre><code>const app = new Hono();
+app.route('/agents/hello', createAgentRouter(Hello));
+export default app;</code></pre>
+  <p>几个性质：<b>URL 是你的</b>（<code>/agents/&lt;name&gt;</code> 只是惯例）；<b>挂载路径不是身份</b>（会话按 durable identity 键控，非 URL——挪挂载点不用迁移数据）；<b>createAgentRouter 是无副作用纯工厂</b>（模型/durability/initialData schema 全在 agent 模块上声明，不在挂载点）；<b>挂载是暴露决定，不是注册</b>（注册了没挂的 agent 走不了 HTTP，但 dispatch/schedule 仍可驱动它）。Hono 是惯例不是必须——默认导出只需 fetch 兼容形状。<br>
+  <span class="cite">guide/routing.md（app.ts is the route map / Mounting an agent）</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>conversation URL：一次对话一张 URL</h2>
+  <p>每个会话在挂载路径 + 你选的会话 id 处：<code>/agents/support/ticket-8472</code>（id 由调用方选，首条消息到达时创建会话）。router 服务的表面：</p>
+  <table>
+    <tr><th>Route</th><th>作用</th></tr>
+    <tr><td><code>POST /:id</code></td><td>投递一条消息（202 受理）</td></tr>
+    <tr><td><code>GET /:id</code></td><td>读会话（快照 / updates / 实时流）</td></tr>
+    <tr><td><code>HEAD /:id</code></td><td>读流元数据</td></tr>
+    <tr><td><code>POST /:id/abort</code></td><td>中止在途与排队工作</td></tr>
+    <tr><td><code>GET /:id/attachments/:id</code></td><td>下载附件字节</td></tr>
+  </table>
+  <ul>
+    <li><b>发送是 fire-and-forget</b>：消息<b>durably 受理</b>后立刻 202，agent 还没跑。响应带坐标：streamUrl、resume offset、submissionId。这条路由<b>没有 wait-reply 模式</b>——回复落在会话里，从那儿读。</li>
+    <li><b>读会话</b>：普通 GET = 一次物化快照；<code>?view=updates&offset=…</code> 用 long-polling 或 SSE 连续流。</li>
+  </ul>
+  <span class="cite">guide/routing.md（The conversation URL）· runtime/src/runtime/handle-conversation-routes.ts</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>SDK：包住整个表面</h2>
+  <p><code>createFlueClient({ url })</code> 一个客户端只地址一个会话 URL，把整张表面打包：<code>send()</code> / <code>wait()</code>（从 settled 记录 resolve/reject）/ <code>observe()</code> / <code>history()</code> / <code>abort()</code> / <code>attachmentUrl()</code>。SDK 的 send 同样 fire-and-forget；wait 在 waiters 侧重连后仍能观察到终态（靠 <code>submission_settled</code> 记录）。stylist 的部署面正是 <code>@flue/sdk</code> 消费 vite+hono 起的服务。<br>
+  <span class="cite">guide/routing.md（The SDK wraps this surface）· packages/sdk/src/public/* · stylist-agent/flue（@flue/sdk）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>dispatch 与 init：服务端/脚本侧的驱动</h2>
+  <ul>
+    <li><b>dispatch(Agent, { id, message })</b>：异步事件（webhook 验签后）进 agent——你选会话，它异步处理并立即返回 <code>DispatchReceipt</code>。<code>useDispatchMessage()</code> 是绑定到本实例的版本。只在 dispatch 用的 agent 甚至无需挂载。</li>
+    <li><b>start() / init()</b>：脚本里 <code>await using flue = await start({ agents:[Reporter], db: sqlite('./nightly.db') })</code> boot 运行时 → <code>init(Reporter, {id})</code> 拿实例句柄 <code>dispatch()</code>/<code>read()</code>。db 选项决定对话是否活过脚本：省略 = 仅内存。<code>start()</code> 不走构建、不吃 db.ts——直接传适配器。</li>
+  </ul>
+  <span class="cite">guide/building-agents.md（dispatch / Standalone scripts）· runtime/src/agent-client.ts · runtime/src/dispatch-queue.ts</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>flue run 的引导：一条无 HTTP 的真管线</h2>
+  <p>run-bootstrap 源码注释值得抄一段：「<code>flue run</code> 引导走的是<b>真实的 durable submission 路径</b>——共享的 runtime 装配（注册、持久化 connect/migrate/validate、coordinator）、durable 直接受理、从 canonical 会话流经观察缝看 settle。不创建任何 HTTP：无 Hono app、无 listener、无 channels。」</p>
+  <p>两处工程细节（解释"为什么这么重"）：bootstrap 由同一个非监听 vite server 加载（与 agent 模块同图）——保证执行图里每个 <code>@flue/runtime</code> 解析到<b>同一份磁盘拷贝</b>（runtime 有模块级注册表：providers/agent 注册/instrumentation，第二份拷贝会静默拆散状态）；无 db.ts 时用 <code>sqlite()</code> 指向 <code>run.db</code>，永不重置——所以 <code>--id</code> 能跨调用续会话。<br>
+  <span class="cite">packages/cli/src/lib/run-bootstrap.ts · packages/cli/src/lib/run-local.ts · guide/database.md（flue run 缓存）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "HTTP 投递消息后服务端立即回什么？",
+          "options": ["完整最终回复文本", "202 受理确认带坐标", "505 等待重试指令", "同步阻塞到跑完"],
+          "answer": 1,
+          "explain": "fire-and-forget：durably 受理即 202，响应带 streamUrl/submissionId。"
+        },
+        {
+          "q": "会话身份键控在什么上？",
+          "options": ["挂载 URL 路径", "agent 的 durable identity", "前端分配的随机串", "进程的内存地址"],
+          "answer": 1,
+          "explain": "按函数名/agentName 键控；挪挂载点不用迁移。"
+        },
+        {
+          "q": "HTTP 上读会话的实时模式靠什么？",
+          "options": ["view updates 长轮询", "前端每秒轮询一次", "POST 返回后覆盖写", "数据库直接外放"],
+          "answer": 0,
+          "explain": "?view=updates&offset 用 long-polling/SSE 连续流。"
+        },
+        {
+          "q": "只被 dispatch 驱动、从不挂载的 agent？",
+          "options": ["无法被调度使用", "依然能正常被驱动", "必须配一条假路由", "只能靠模型记住"],
+          "answer": 1,
+          "explain": "注册了就能 dispatch/schedule 驱动；挂载只是 HTTP 暴露决定。"
+        },
+        {
+          "q": "flue run 引导走什么路径？",
+          "options": ["一套特殊内存逻辑", "真实的 durable submission", "临时 Hono 测试服务", "直接调 SDK 客户端"],
+          "answer": 1,
+          "explain": "共享 runtime 装配 + durable 受理 + 从 canonical 流看 settle，无 HTTP。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：一句话串起 L6——flue run 起无 HTTP 的真管线、app.ts 显式挂 <code>createAgentRouter</code> 给每个会话一张 URL（POST 受理 / GET 读流）、dispatch 从服务端异步驱动、start/init 在脚本内引导、SDK 把整张会话 URL 表面打包给你。殊途同归到同一条 durable submission 管线。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 12 课「案例课：stylist-agent」</strong><br>
+  阶段③。把你的 stylist-agent/flue 全量拆开：三个 agent 怎么组织、valibot 工具注册器、durability 决策复盘——以及最难得的 pi-ai 0.83.0 与 flue 的桥接为什么成立。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你某次 POST 拿不到回复、或想从脚本 cron 里驱动 stylist——回 §5 对 dispatch/start 的边界。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 11 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/routing.md</code> · <code>packages/sdk/src</code> · <code>packages/cli/src/lib/run-bootstrap.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

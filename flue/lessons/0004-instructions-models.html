@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 4 课 · 指令与模型</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 4 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>指令与模型：useModel 的两条铁律与 provider 解析</h1>
+  <p class="subtitle">读完这一课，你能说清 model specifier 是怎么被解析成一次真实模型调用的、中途换模型为什么"下个 submission 才生效"，以及 compaction/thinking 是挂在谁的绳上。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 3 课。",
+      "questions": [
+        {
+          "q": "哪个 hook 在 subagent 帧里被禁用？",
+          "options": ["useModel 被禁用了", "useTool 与 useSkill", "useDataWriter 写入", "useDelivery 游标"],
+          "answer": 0,
+          "explain": "useModel 在 subagent 渲染不可用——delegate 的模型在 useSubagent 定义上声明。"
+        },
+        {
+          "q": "持久状态写入的副作用是？",
+          "options": ["会唤醒 agent 重跑", "静默不中途重渲染", "直接写进系统提示", "发给客户端当事件"],
+          "answer": 1,
+          "explain": "静默：不 wake、不中途重渲染，下个 turn 读到。"
+        },
+        {
+          "q": "每条投递都跑的生命周期缝是？",
+          "options": ["responseStart 起点", "responseFinish 终点", "agentStart 收件缝", "dataWriter 写数据"],
+          "answer": 2,
+          "explain": "agent 类 hook 每条投递都跑；response 类每个响应恰好一次。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>useModel 的两条铁律</h2>
+  <p>每个 agent 同一时刻被<b>恰好一个</b> LLM 驱动，用 <code>useModel()</code> 声明。它是 agent 里<b>唯一必须</b>的 hook，两条规则：</p>
+  <ul>
+    <li><b>必须调用</b>：不带 <code>useModel</code> 的 render 无法开始。</li>
+    <li><b>每次 render 恰好一次</b>：参数可以逐 render 变化（从持久状态里挑模型），但调用不能消失、不能重复——帧上已有 model 再调就抛 "called twice in one render"。</li>
+  </ul>
+  <p>它是<b>声明不是客户端</b>：什么都不返回，你从不 new SDK 对象、从不把 API key 穿过 agent 代码——连接、鉴权、流式、重试全归运行时。<br>
+  <span class="cite">runtime/src/hooks/use-model.ts（校验）· guide/models.md（Declaring a model）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>model specifier 与 provider 解析</h2>
+  <p>模型说明符是 <code>'provider-id/model-id'</code> 的字符串，第一个 <code>/</code> 前是 provider，后面是 provider 自己的模型 id（可能还含 <code>/</code>）：</p>
+  <ul>
+    <li><code>anthropic/claude-sonnet-4-6</code> → provider <code>anthropic</code></li>
+    <li><code>openrouter/moonshotai/kimi-k2.6</code> → provider <code>openrouter</code>、模型 <code>moonshotai/kimi-k2.6</code></li>
+    <li><code>cloudflare/@cf/moonshotai/kimi-k2.6</code> → provider <code>cloudflare</code>（Workers AI 目标）</li>
+  </ul>
+  <p>默认解析用 <b>pi 的内置 provider 全集</b>（anthropic/openai/google/groq/mistral/xai/deepseek/cerebras/together/fireworks/openrouter…）。每个 catalog 条目带模型元数据：wire 协议、endpoint、上下文窗口、输出上限、成本、是否支持 reasoning/图片——<b>compaction 阈值、thinking 是否上 wire、能不能收图都由它决定</b>。</p>
+  <p>只想带用到的 provider，就在 <code>flue()</code> 插件配置里列 <code>providers: ['anthropic','openai']</code>——生成的服务入口只 import 这些工厂。列表是<b>穷尽式</b>的：没列到的 provider，specifier 直接解析失败。<br>
+  <span class="cite">guide/models.md（Model specifier / providers config）</span></p>
+
+  <div class="sidenote">未知 specifier <b>fail fast</b>：请求发出前就报「unresolved provider + model id」。这也解释了 flue skill 红线的实战来源——provider 没配密钥时那句 <code>Provider is not configured</code> 就是在这层抛的。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>submission 作用域：为什么换模型要等下一提交</h2>
+  <p>model、thinkingLevel、compaction 都是 <b>submission 作用域</b>：运行时在 agent「醒来处理一个被接受的输入」时<b>读一次</b>。中途重渲染算出的新值会「锁存」，但只作用于<b>下一次 submission</b>——不会在当次进行到一半时换。</p>
+  <p>典型升级（escalation）模式：</p>
+  <pre><code>const [escalated, setEscalated] = usePersistentState('escalated', false);
+useModel(escalated ? 'anthropic/claude-opus-4-6' : 'anthropic/claude-haiku-4-5');</code></pre>
+  <p>点了 <code>escalate_review</code> 的那次响应仍跑在便宜模型上；<b>对话的下一条消息</b>才切到强模型。注意 <code>dispatch</code>/HTTP 层<b>没有 per-message 模型参数</b>——模型选择属于 agent 函数。<br>
+  <span class="cite">guide/models.md（Changing models mid-conversation）· runtime/src/hooks/use-model.ts（submission-scoped）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>调优两个旋钮：thinkingLevel 与 compaction</h2>
+  <p><code>useModel(model, options)</code> 的 options 只有两个字段：</p>
+  <ul>
+    <li><b>thinkingLevel</b>：<code>'off'|'minimal'|'low'|'medium'|'high'|'xhigh'|'max'</code>，默认 <code>'medium'</code>；只是<b>默认值</b>——subagent 定义、harness.prompt 可逐操作覆盖。只有 catalog 标记 reasoning-capable 的模型，thinking 才会真上 wire（自定义 provider 若跳过 <code>reasoning</code> 元数据，会被静默丢弃）。</li>
+    <li><b>compaction</b>：临近上下文上限时自动把旧历史折叠成摘要、保留近期原文。可调 <code>reserveTokens</code>（提前多少触发，默认 model-aware ≤20000）、<code>keepRecentTokens</code>（多少近期原样存活，默认 8000）、<code>model</code>（用便宜模型做摘要）。<code>compaction:false</code> 只关<b>阈值压缩</b>，溢出恢复和显式 <code>harness.compact()</code> 仍会压。</li>
+  </ul>
+  <span class="cite">guide/models.md（Model reasoning effort / Compaction）· runtime/src/agent-tuning.ts</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>凭证从哪来：环境，不是你的代码</h2>
+  <ul>
+    <li><b>本地</b>：项目根 <code>.env</code>（<code>ANTHROPIC_API_KEY</code> 等）；<code>flue run</code> 自动加载（<code>--env</code> 换文件）；<code>vite dev</code> 按 vite 那套 <code>.env*</code>。shell 导出的值永远压过文件值。<b>别把 .env 提交。</b></li>
+    <li><b>部署态</b>：Node 读进程环境变量（宿主 secrets 机制）；Cloudflare 用 <code>wrangler secret put</code>，本地用 <code>.dev.vars</code>。</li>
+    <li><b>自定义</b>：provider 的 <code>auth.apiKey.resolve()</code> 返回你代码产出的任何凭证——网关 key、secret manager 都行，每次请求都跑，轮换也支持。</li>
+  </ul>
+  <span class="cite">guide/models.md（Provider credentials）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>useInstruction 与 response 元数据：补丁式组装</h2>
+  <ul>
+    <li><b>useInstruction(text)</b>：低层逃生舱——把一段原样文本追加到「return 指令之后、按调用顺序」。无结构、无身份、无变更追踪，零散拼接可用，成体系的东西应抽自定义 hook。<br>
+    <span class="cite">runtime/src/hooks/use-instruction.ts</span></li>
+    <li><b>useResponseStart/Finish 的返回值</b>：深合并到响应的 <code>metadata</code>（AI SDK 惯例，信封字段，客户端在内容流之外读）——打时间戳、记 token 就靠它：<code>useResponseFinish(({metadata,response}) =&gt; ({ elapsed, totalTokens: response.usage.totalTokens }))</code>。<br>
+    <span class="cite">guide/agent-hooks.md（Event hooks）· runtime/src/hooks/use-response-start.ts</span></li>
+  </ul>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "model specifier 里的斜杠怎么切分？",
+          "options": ["按最后一个斜杠切分", "按第一个斜杠切分", "字符串本身不能有斜杠", "按反斜杠转义切分"],
+          "answer": 1,
+          "explain": "第一个 / 前是 provider，其余全是 provider 的模型 id（可能再含 /）。"
+        },
+        {
+          "q": "中途重渲染算出新模型，何时生效？",
+          "options": ["当次响应立刻切换", "下个 submission 生效", "下个 turn 立即生效", "重启进程之后才生效"],
+          "answer": 1,
+          "explain": "model 是 submission 作用域：提交开始读一次，新值锁存到下个提交。"
+        },
+        {
+          "q": "compaction:false 关掉的是什么？",
+          "options": ["全部压缩能力", "阈值自动压缩", "显式 compact 调用", "溢出恢复机制"],
+          "answer": 1,
+          "explain": "只关阈值压缩；溢出恢复和显式 harness.compact() 仍会压。"
+        },
+        {
+          "q": "本地密钥文件叫什么、谁加载？",
+          "options": ["由 agent 代码手动读", "由运行时读项目根 .env", "由数据库集中管理", "由前端页面注入配置"],
+          "answer": 1,
+          "explain": "flue run 自动加载项目根 .env（--env 换文件）；agent 代码从不碰密钥。"
+        },
+        {
+          "q": "给响应打时间戳该用哪个 hook？",
+          "options": ["useAgentFinish 返回值", "useResponseStart 返回值", "useDataWriter 的写入", "usePersistentState 状态"],
+          "answer": 1,
+          "explain": "response 类 hook 的返回值深合并到 metadata——在内容流之外给客户端读。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：model 的声明与解析链路一句话讲清——你给 <code>useModel('provider/model')</code>，运行时按 provider 表解析出元数据、按环境取凭证，在<b>每个 submission 开始时</b>把「模型 + thinking + compaction」钉成当次的调用配置。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 5 课「工具系统」</strong><br>
+    工具是 agent 唯一能"动手"的口子。拆 useTool/ToolDefinition（valibot）、工具调用生命周期、harness/durable/条件工具，以及 Headroom 里那种内联 valibot 工具的写法为什么成立。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如 stylist 里 <code>useModel('opencode-luna/deepseek-v4-flash-vision-exp')</code> 这种自定义 provider 路由、或你"换模型没立刻生效"的经历——拿来对第 3 节就懂了。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 4 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>runtime/src/hooks/use-model.ts</code> · <code>guide/models.md</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

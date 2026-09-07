@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 7 课 · sandbox：agent 的工位</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 7 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>sandbox：attach 一个环境，一次定义四样能力</h1>
+  <p class="subtitle">读完这一课，你能在 virtual / local / remote 三种环境之间做对选择，并说清 useSandbox 的「presence 翻转只在 turn 边界」为什么是关键语义。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 6 课。",
+      "questions": [
+        {
+          "q": "模型常驻看到技能的哪部分？",
+          "options": ["全部指令内容", "一行名字加描述", "支持文件清单", "目录的文件树"],
+          "answer": 1,
+          "explain": "每技能一行 name+description 常驻；内容激活才加载。"
+        },
+        {
+          "q": "激活技能后 instructions 从哪来？",
+          "options": ["改写的系统提示", "activate_skill 工具结果", "持久状态里读回", "前端注入消息"],
+          "answer": 1,
+          "explain": "briefing 是工具结果，prompt 前缀不变。"
+        },
+        {
+          "q": "打包拒绝什么文件？",
+          "options": ["超过一 MB 的文件", ".env 私钥符号链接", "纯英文的 md 文件", "src 目录下的代码"],
+          "answer": 1,
+          "explain": "secrets（.env/私钥/凭证/符号链接）是 hard error。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>attach 一个环境 = 一次定义四样东西</h2>
+  <p>agent 至多一个环境，attach 它一次解锁四件事：</p>
+  <ul>
+    <li><b>文件与 shell 工具</b>：工具集新增 <code>read/write/edit/bash/grep/glob</code>，全部操作该环境。</li>
+    <li><b>工作区上下文</b>：初始化时 runtime 扫工作目录，把 cwd 路径、目录列表、<code>AGENTS.md</code> 内容拼进系统提示。</li>
+    <li><b>workspace skills</b>：<code>&lt;cwd&gt;/.agents/skills/</code> 下技能自动入目录（上一课）。</li>
+    <li><b>子代理共享</b>：delegate 用同一个环境——task 可换子目录，换不了沙箱。harness 工具也能摸到同一环境。</li>
+  </ul>
+  <p>没 sandbox 就一样都没有：无文件/shell 工具、提示里无工作区、<code>harness.sandbox</code> 抛错；其余（自定义工具/技能/子代理/状态）不受影响。原则：<b>选支持任务的最窄环境</b>。<br>
+  <span class="cite">guide/sandboxes.md（What a sandbox adds）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>virtual 内存沙箱：最轻、隔离、易逝</h2>
+  <p>纯 TypeScript 实现（just-bash 引擎）：内存文件系统 + 模拟 bash。标准 unix 工具箱大多能用（ls/sed/awk/jq/sort/管道/重定向），还有 curl；<b>从不真的 spawn 进程</b>。</p>
+  <pre><code>useSandbox(bash(() =&gt; new Bash({ fs: new InMemoryFs(), network: { allowedUrlPrefixes: [...] } })));</code></pre>
+  <ul>
+    <li><b>隔离宿主</b>：命令在进程内模拟，摸不到宿主文件系统/进程/环境变量；网络 opt-in（<code>network.allowedUrlPrefixes</code> 或 <code>dangerouslyAllowFullInternetAccess</code>）。</li>
+    <li><b>易逝</b>：每次运行时为新一轮工作从零重建——处理一条消息写的文件下条就没了。要留的知识进持久状态；文件要留就上真沙箱。</li>
+    <li><b>够用场景</b>：curl+jq 数据活、文本整形、只要草稿空间的活。harness 工具可 staging 进出同一环境。</li>
+  </ul>
+  <span class="cite">guide/sandboxes.md（The virtual sandbox）· runtime/src/sandbox.ts</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>local()：真机绑定，无隔离</h2>
+  <p>Node 目标的内置 <code>local()</code> 把 agent 直接绑到宿主：文件操作走真文件系统，bash 走宿主 shell 真进程。<b>按设计无隔离</b>——适合开发工具、CI、coding agent、自托管自动化；<b>别当不可信请求/多租户的隔离边界</b>。</p>
+  <ul>
+    <li><b>cwd</b> 默认 <code>process.cwd()</code>，<code>local({ cwd })</code> 覆盖。</li>
+    <li><b>shell 不继承你的进程环境</b>：默认只放行少量 shell 必需白名单（PATH/HOME/USER/LANG/TERM/TMPDIR 之类），<b>永不带 API key/token/云凭证</b>；其它要 <code>env</code> 逐变量 opt-in（<code>GH_TOKEN: process.env.GH_TOKEN</code>）。给 <code>undefined</code> 可去掉某个默认。<code>env:{...process.env}</code> = 把整个宿主环境（含 secrets）给模型的 shell，只在完全可信环境做。环境在构造时快照一次。</li>
+  </ul>
+  <div class="sidenote">宽 shell 之前先想：特权动作能否做成窄应用工具？模型驱动的 shell 应该持有越少越好——工具里闭包钉死 token，比 shell 里裸奔强。</div>
+  <span class="cite">guide/sandboxes.md（The local sandbox）· guide/node-target.md（local() reference）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>remote sandbox：按实例给持久工位</h2>
+  <p>要 per-conversation 隔离、完整 Linux 工具链、或不想跑在自己宿主的代码时，装一个 <b>sandbox 适配器</b>（<code>flue add sandbox &lt;provider&gt;</code>；Daytona/E2B/Modal/Cloudflare Sandbox 等）。适配器刻意薄：你的应用创建/复用/删除 provider 沙箱，flue 只连你给的、从不销毁 provider 基建。</p>
+  <pre><code>useSandbox({
+  async createSandbox(options) {
+    const client = new Daytona();
+    const sandbox = await client.create();
+    return daytona(sandbox).createSandbox(options);
+  },
+});</code></pre>
+  <p><code>createSandbox({ id })</code> 收到 agent 实例 id——工厂先按 id 查已有沙箱再创建，就给每个会话一个<b>跨消息、跨进程重启存活的持久工作区</b>。取消语义：local() 用进程组 kill 真停；多数 provider SDK 无中途取消，reject 后远端命令在后台继续、输出被丢弃。<br>
+  <span class="cite">guide/sandboxes.md（Remote sandboxes）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>沙箱自带工具 vs 替换默认集</h2>
+  <p>沙箱工厂可带 <code>tools</code> 函数——在时<b>替换</b>框架默认的模型侧工具集（无 exec 环境的适配器会保留 read/write/edit、把 shell 型 bash/grep/glob 换成自己的 executor）。适配器用导出的逐工具工厂（<code>createReadTool</code>/<code>createBashTool</code>…）组合，而不是从零写。<br>
+  <span class="cite">guide/sandboxes.md（Sandbox-provided tools）· runtime/src/agent.ts</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>条件 attach：presence 是唯一可观察量</h2>
+  <p>useSandbox 可条件调用——agent 中途获得/失去沙箱：<code>if (investigating) useSandbox(local({cwd}))</code>。关键语义：</p>
+  <ul>
+    <li><b>presence 在初始化与每个 turn 边界读</b>；翻转时在<b>下个模型调用前</b>换环境——attach 解析声明的工厂，detach 连文件/shell 工具一起摘掉，两边都不带东西过界。</li>
+    <li>翻转通过单条 <code>environment</code> 信号告知模型（重述当前完整状态 + 警告旧环境文件可能不可达）。系统提示冻结到下次 compaction。</li>
+    <li>换环境重写 tools 数组 → prompt cache 失效。工厂每次 render 都是新对象，所以「A 换 B 但保持 attach」不会中途换——下个 submission 初始化才生效。条件住在持久状态里，所以可重放：每次后续提交重挂同一声明，按实例 id 键控的适配器解析回同一工位。</li>
+  </ul>
+  <span class="cite">guide/sandboxes.md（Conditional attachment）· runtime/src/hooks/render.ts（sandbox presence）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "虚拟内存沙箱的突出特性是？",
+          "options": ["隔离宿主且会易逝", "绑定宿主真文件系统", "自动持久化每个文件", "强制联网下载数据"],
+          "answer": 0,
+          "explain": "内存文件系统 + 模拟 bash：隔离宿主、网络 opt-in、每轮从零重建（易逝）。"
+        },
+        {
+          "q": "local() 的 shell 默认继承什么？",
+          "options": ["全部进程环境变量", "仅一小撮白名单变量", "含 API key 的变量", "宿主所有用户配置"],
+          "answer": 1,
+          "explain": "只放行 PATH/HOME 之类白名单，永不带 secrets；其它逐变量 opt-in。"
+        },
+        {
+          "q": "沙箱 presence 何时被读取？",
+          "options": ["渲染中途任意读取", "初始化与每个 turn 边界", "仅会话创建时读一次", "每次工具调用时读取"],
+          "answer": 1,
+          "explain": "presence 在初始化与 turn 边界读；翻转换环境绝不在 turn 中途。"
+        },
+        {
+          "q": "remote 沙箱怎样给每个会话持久工位？",
+          "options": ["每次新建全新沙箱", "按实例 id 查已有再建", "复制宿主的根文件系统", "把所有沙箱都存数据库"],
+          "answer": 1,
+          "explain": "createSandbox 收到实例 id，工厂先查已有沙箱——跨消息/重启存活。"
+        },
+        {
+          "q": "无 sandbox 的 agent 缺少什么？",
+          "options": ["自定义工具和技能", "文件工具与工作区上下文", "持久状态与数据流", "模型调用与指令能力"],
+          "answer": 1,
+          "explain": "无沙箱则无文件/shell 工具、无工作区上下文、harness.sandbox 抛错；其余照常。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：选型一句话——要隔离+轻 → virtual；要动真机/仓库/CI → local（信得过环境）；要隔离+持久工位 → remote 适配器按实例 id 键控。无论哪种，「presence 翻转只在 turn 边界」决定了你什么时候能安全地给 agent 增删环境。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 8 课「会话与状态」</strong><br>
+  进入阶段②。usePersistentState 的存储真相（record log）、会话默认存哪（SQLite run.db vs @flue/postgres）、conversation 投影怎么把更新推给客户端。Headroom 的 Postgres 选型会在这课复盘。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如你 Headroom/stylist 用的是 local() 还是没挂沙箱、哪次想给 agent 加文件能力没生效——先回 §6 对 presence 语义。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 7 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/sandboxes.md</code> · <code>runtime/src/sandbox.ts</code> · <code>runtime/src/hooks/use-sandbox.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

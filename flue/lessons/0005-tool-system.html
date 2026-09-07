@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 5 课 · 工具系统</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 5 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>工具系统：模型决定何时，你的代码决定何事</h1>
+  <p class="subtitle">读完这一课，你能讲清一次工具调用的完整生命周期——从模型看到的 schema，到 <code>run</code> 的返回信封，到 harness/durable/条件工具三种变体分别解决什么问题。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 4 课。",
+      "questions": [
+        {
+          "q": "model specifier 如何切分 provider？",
+          "options": ["第一个斜杠前是 provider", "最后一个斜杠前是", "provider 要单独配置字段", "模型 id 不能含斜杠"],
+          "answer": 0,
+          "explain": "第一个 / 前是 provider，其余是模型 id（可再含 /）。"
+        },
+        {
+          "q": "重渲染算出的新模型何时生效？",
+          "options": ["下个 submission 生效", "当次响应立刻生效", "重启进程之后生效", "每个 turn 都即时生效"],
+          "answer": 0,
+          "explain": "model/thinking/compaction 是 submission 级，提交开始时读一次。"
+        },
+        {
+          "q": "useModel 在哪个帧被禁用？",
+          "options": ["agent 根帧中被禁用", "subagent 委派帧禁用", "自定义 hook 中被禁", "工具 run 里被禁"],
+          "answer": 1,
+          "explain": "subagent 帧没有 useModel——delegate 模型在 useSubagent 定义上声明。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>工具 = 函数，但由模型调度</h2>
+  <p>工具是你写的函数，写给模型看：模型决定<b>何时</b>调，你的代码决定<b>发生什么</b>。与 skill（教流程）、sandbox（给文件/命令）并列：工具执行<b>你应用的代码</b>。</p>
+  <p>定义有四个部分：<code>name</code>（模型调用它的名字）、<code>description</code>（教模型何时用——<b>模型唯一的文档</b>）、可选 <code>input</code>（参数 schema）、<code>run</code>（你的代码）。<code>defineTool(...)</code> 校验后返回冻结对象——适合放 <code>src/tools/</code> 共享；一次性用途直接 <code>useTool({...})</code> 内联。</p>
+  <pre><code>import { defineTool } from '@flue/runtime';
+import * as v from 'valibot';
+export const lookupOrder = defineTool({
+  name: 'lookup_order',
+  description: 'Look up one order by id and return its current status.',
+  input: v.object({ orderId: v.string() }),
+  async run({ data }) {
+    const order = await orders.get(data.orderId);
+    return { output: { status: order.status, eta: order.eta } };
+  },
+});</code></pre>
+  <span class="cite">guide/tools.md（Your first tool）· Headroom 项目（内联 valibot useTool：record_energy / generate_plan）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>一次工具调用的生命周期</h2>
+  <div class="flow">
+    <div class="node">模型读到 name+description+schema<small>input 被转成 JSON Schema；无 input 则空对象</small></div>
+    <div class="arrow">↓ <small>模型带参数调用</small></div>
+    <div class="node">valibot 解析参数<small>顶层必须是 object schema</small></div>
+    <div class="arrow">↓ <small>解析成功</small></div>
+    <div class="node hot">run({ data, signal, log, toolCallId })<small>data 已类型化；校验失败则 run 不被调用，错误回给模型纠正重试</small></div>
+    <div class="arrow">↓ <small>返回信封</small></div>
+    <div class="node">结果回给模型<small>{ output?, terminate? }；裸字符串 = {output} 简写；run 抛错 = 错误结果而非崩溃</small></div>
+  </div>
+  <p>几个值得记死的语义：</p>
+  <ul>
+    <li><b>输入在 run 之前解析</b>：<code>input</code> 必须是 valibot <b>顶层 object</b>；校验失败 <code>run</code> 永不执行，失败作为工具错误回给模型，让它可以纠正参数重试。</li>
+    <li><b>输出是信封</b>：<code>{ output?, terminate? }</code>。<code>output</code> 是要 JSON 化的数据；裸 <code>string</code> 是 <code>{output}</code> 的简写；只有没声明 output schema 时才允许什么都不返回。可选 <code>output</code> schema 做返回校验。想要结束本轮就 <code>terminate:true</code>。</li>
+    <li><b>run 抛错不崩 agent</b>：变成模型能看到的错误结果，让它换路子或如实告知。</li>
+    <li><b>context</b>：<code>signal</code>（取消；run 忽略 signal 也卡不死 agent——runtime 放弃 await）、<code>log</code>（长任务进度，流入会话事件，模型看不见）、<code>toolCallId</code>（与调用事件关联副作用）。</li>
+  </ul>
+  <span class="cite">guide/tools.md（How a tool call works）· runtime/src/hooks/use-tool.ts</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>内置工具与保留名</h2>
+  <table>
+    <tr><th>工具</th><th>何时在集内</th><th>说明</th></tr>
+    <tr><td>read / write / edit / bash / grep / glob</td><td>agent 挂载了 sandbox</td><td>标准模型侧工具，操作沙箱；工厂导出自 <code>agent.ts</code>（createReadTool…），沙箱适配可自组替换</td></tr>
+    <tr><td>task</td><td><b>始终在</b></td><td>子代理委派专用</td></tr>
+    <tr><td>activate_skill</td><td>agent 有技能</td><td>技能激活（briefing 以工具结果返回，不碰 prompt 前缀）</td></tr>
+    <tr><td>read_skill_resource</td><td>技能带支持文件</td><td>按虚拟路径读打包的资源</td></tr>
+  </table>
+  <p>这些名字<b>保留</b>——自定义工具不能撞名（撞了在工具集装配时抛错）。<br>
+  <span class="cite">guide/tools.md（Built-in tools）· runtime/src/agent.ts（每工具的工厂 + 参数 schema）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>harness 工具：摸回运行时自己</h2>
+  <p>普通工具是输入的纯函数；声明 <code>harness:true</code>，<code>run</code> 就能拿到 <code>harness</code>：</p>
+  <ul>
+    <li><code>harness.sandbox</code>——agent 的活环境（readFile/writeFile/exec…），直接摸、无会话记录。agent 没声明沙箱就抛错。</li>
+    <li><code>harness.prompt(text, opts)</code>——在 harness 自己的「草稿会话」里跑一次模型操作；重复调用会续接。可 <code>result</code>（valibot，要结构化结果）或 <code>tools</code>（仅那次操作的额外工具）。</li>
+  </ul>
+  <p>典型：一个工具调用里 staging 文件 → 聚焦模型工作 → 校验结果。harness 调用<b>计委派深度上限</b>、按工具调用作用域结算；<code>harness:true</code> 工具永远不能脱离 agent 会话独立跑。<br>
+  <span class="cite">guide/tools.md（Harness tools）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>durable 工具：必须完成的活</h2>
+  <p>进程中途崩掉时，普通在途工具调用<b>不会重跑</b>（runtime 不知道副作用做没做），以 unknown-outcome 错误收场，模型从那儿续。必须完成的活（支付、多步同步、配环境）声明 <code>durable:true</code>，<code>run</code> 拿到 <code>step</code>：</p>
+  <pre><code>const tenant = await step.do('create-tenant', () =&gt; billing.createTenant(customerId));
+for (const p of DEFAULT_PROJECTS) await step.do(`seed:${p.name}`, () =&gt; projects.seed(tenant.id, p));</code></pre>
+  <p>恢复时整段重跑，已完成 step 回放记录、从第一个没完成的继续。四条规则：①所有有副作用的进 step；②名字确定性派生（别用随机/时间）；③值保持 JSON 且小（大件存沙箱记指针）；④step 是 exactly-once 记录、at-least-once 执行——围绕外部效果的 step 要各自幂等。<br>
+  <span class="cite">guide/tools.md（Durable tools）· 0009 durability 课将展开整张恢复模型</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>条件工具：把"存在"当程序逻辑</h2>
+  <p>agent 每轮重渲染都从零声明工具集，所以工具<b>在不在</b>只是 if 的事：<code>if (approved) useTool(publishRelease)</code>。没挂载的工具模型根本调不到——比指令说"不许用"更强的保证。工具集在两轮间变了，运行时在下个 turn 边界给模型一条 <code>resources</code> 信号（"新工具可用：…"）。</p>
+  <p><b>成本提醒</b>：换工具集 = 重写 provider 的 tools 数组 = prompt cache 失效。所以用「变更少的状态」去 gate 工具；唯一例外是"上一个工具调用解锁下一个"的模式——Anthropic 当前模型（除 Haiku）会在该定义出现处才载入，cache 存活。<br>
+  <span class="cite">guide/tools.md（Conditional tools）· runtime/src/hooks/render.ts（resources 快照）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>保护访问：参数不是授权边界</h2>
+  <p>工具参数是「模型选的输入」，不是授权边界。让应用先决定工具能用哪个 customer/account/credential，再让模型只在这些值里选。对按客户派发的事件：把应用已校验的标识放投递信号的 <code>attributes</code>，工具里用 <code>useDelivery()</code> 读——模型能选 orderId，但选不了查询用的 customerId。包 provider SDK 时同理：用闭包/配置把 token、仓库钉死，只暴露窄动作。<br>
+  <span class="cite">guide/tools.md（Protect access）· runtime/src/hooks/use-delivery.ts</span></p>
+
+  <!-- ============ 8 ============ -->
+  <h2><span class="secno">§8</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "工具 run 的返回信封是什么形状？",
+          "options": ["裸对象无需包裹", "output 加 terminate 信封", "必须返回一个字符串", "只允许返回 undefined"],
+          "answer": 1,
+          "explain": "返回 { output?, terminate? }；裸 string 是 {output} 简写。"
+        },
+        {
+          "q": "input 校验失败时会发生什么？",
+          "options": ["run 照样会被执行", "run 不被调用错误回模型", "整个会话立刻崩溃", "参数被强制类型转换"],
+          "answer": 1,
+          "explain": "run 永不执行，失败作为工具错误回给模型纠正重试。"
+        },
+        {
+          "q": "哪个工具始终在工具集里？",
+          "options": ["bash 执行命令工具", "read 读文件工具", "task 委派子代理", "activate_skill 技能"],
+          "answer": 2,
+          "explain": "task 始终在；文件/shell 工具随 sandbox、activate_skill 随技能、read_skill_resource 随支持文件。"
+        },
+        {
+          "q": "durable 工具靠什么保证不丢活？",
+          "options": ["重复调用整个 run", "step.do 记录与回放", "事务性数据库提交", "每步强制同步等待"],
+          "answer": 1,
+          "explain": "step.do 每名一次、记录返回值；恢复时整段重跑、已完成 step 回放。"
+        },
+        {
+          "q": "换工具集最直接的代价是什么？",
+          "options": ["模型开始拒绝调用", "prompt cache 失效", "工具顺序被打乱", "持久状态被清空"],
+          "answer": 1,
+          "explain": "重写 tools 数组会使 provider prompt cache 失效——所以用变化少的状态 gate 工具。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：一次工具调用 = 模型见 schema → valibot 解析 → <code>run</code> → 信封回填；三种变体各解决一个问题——harness（摸回运行时）、durable（崩溃不丢活）、条件挂载（存在即逻辑）。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 6 课「skill 挂载机制」</strong><br>
+  为什么 SKILL.md 必须静态 import、打包时会发生什么、activate_skill 为什么是工具调用而不是改 prompt、以及 Headroom 里 skills 目录与你的 pi skills 为什么能互通。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如 Headroom 里 <code>record_energy</code> 裸字符串返回、你踩过的"工具重复名/保留名"报错、或 durable 工具到底该不该用于你的某个写库操作——来对答案。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 5 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/tools.md</code> · <code>runtime/src/agent.ts</code> · <code>runtime/src/hooks/use-tool.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

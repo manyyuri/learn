@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 13 课 · 架构对照：flue vs pi</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 13 课 · flue 架构深潜 · 阶段③ 案例与对照</p>
+  <h1>架构对照：pi 是你的旧课，flue 是你的新课——它们共享地基</h1>
+  <p class="subtitle">读完这一课，你能在 pi 与 flue 两台机器间画出精确的同源图：谁复用谁、谁自建什么、workflow-console 该站在哪个抽象上。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 12 课。",
+      "questions": [
+        {
+          "q": "stylist 的自定义 provider 从哪来？",
+          "options": ["flue 内置的默认集", "pi-ai createProvider 注册", "调外部模型聚合商", "server 启动硬编码"],
+          "answer": 1,
+          "explain": "setProvider(createProvider({id:'opencode-luna',...}))。"
+        },
+        {
+          "q": "写工具 step 名怎么确定性取？",
+          "options": ["名字加随机串", "工具名加参数序列化", "自增全局计数器", "直接用工具名字"],
+          "answer": 1,
+          "explain": "`${name}:${JSON.stringify(data)}`。"
+        },
+        {
+          "q": "cron 用确定性会话 id 买什么？",
+          "options": ["前端好记的路径", "重投递续会话幂等", "满足数据库约束", "日志排序方便"],
+          "answer": 1,
+          "explain": "daily:date 同天重投递不重复生成。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>先摆事实：pi 的分层</h2>
+  <p>你在 pi-coding-agent 工作区深潜过 <code>/Users/junyingli/project/tools/pi</code>。它的 packages 布局本身就是分层的线索：</p>
+  <table>
+    <tr><th>包</th><th>npm 名</th><th>是什么</th></tr>
+    <tr><td><code>packages/ai</code></td><td><code>@earendil-works/pi-ai</code></td><td>provider/模型层：catalog、createProvider、各 api 运输工厂、流式、usage</td></tr>
+    <tr><td><code>packages/agent</code></td><td><code>@earendil-works/pi-agent-core</code></td><td>纯 agent 核心：agent-loop、消息/工具类型、harness 类型</td></tr>
+    <tr><td><code>packages/coding-agent</code></td><td>（产品级 harness）</td><td>完整 IDE agent：session、resource-loader、model-runtime、compaction、tools、扩展…（你 pi 课精读的层）</td></tr>
+  </table>
+  <span class="cite">/Users/junyingli/project/tools/pi/packages（ai/agent/coding-agent）· 你在 pi-coding-agent 工作区的学习记录</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>flue 站在哪层：证据说话</h2>
+  <p>0005 课的论断现在用依赖证据钉死——<code>@flue/runtime</code> 的 dependencies 只有两个 pi 包：<code>@earendil-works/pi-ai</code> 与 <code>@earendil-works/pi-agent-core</code>（都 ^0.83.0，和 stylist 直接装的 pi-ai 0.83.0 同一份）。逐符号看源码 import：</p>
+  <ul>
+    <li><b>pi-ai（值 + 类型都复用）</b>：<code>createProvider</code> / <code>createModels</code> / <code>createAssistantMessageEventStream</code> / <code>clampThinkingLevel</code> / <code>parseStreamingJson</code>、类型 <code>Api/Model/Provider</code>、<code>isContextOverflow</code>（compaction 分类）——provider 目录与流式运输是 pi-ai 的。</li>
+    <li><b>pi-agent-core（纯类型）</b>：import 全是 <code>import type</code>——<code>AgentMessage</code> / <code>AgentTool</code> 这些<b>消息与工具的形状</b>借用 pi 的约定，但没有 import 它的 loop 函数。</li>
+    <li><b>flue 自建</b>：render/frame、submission 循环、会话 append-only 流、durability、HTTP/SDK、vite 变换——这些都长在 pi-ai 的运输之上。</li>
+  </ul>
+  <span class="cite">packages/runtime/package.json · runtime/src/（providers.ts / compaction.ts / usage.ts 的 import）· stylist-agent（pi-ai 0.83.0）</span></p>
+
+  <div class="sidenote">所以 stylist 里你"顺手" import <code>@earendil-works/pi-ai</code> 写 <code>createProvider</code>——那不是跨框架乱接，而是<b>直接用 flue 自己的底层模型库</b>。你 pi 课学的 provider 心智在这里原样生效。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>心智对照：coding-agent vs flue</h2>
+  <table>
+    <tr><th>轴</th><th>pi coding-agent（你旧课）</th><th>flue（本课）</th></tr>
+    <tr><td>心智模型</td><td>命令式：session 树 + 事件流 + 资源加载</td><td>声明式：agent 即函数 + hooks，React 式 render</td></tr>
+    <tr><td>agent 表达</td><td>面向 IDE 交互的 session/事件驱动</td><td>render 返回指令 + hooks 注册能力</td></tr>
+    <tr><td>循环</td><td>agent-loop 是独立核心</td><td>自建 submission 循环（每 turn 重渲染），复用 pi-ai 运输</td></tr>
+    <tr><td>会话</td><td>session 树/JSONL + compaction（coding-agent）</td><td>canonical append-only 流 + 受理契约 + DO/SQLite/Postgres</td></tr>
+    <tr><td>工具</td><td>工具注册 + 宿主工具</td><td>useTool(valibot) + sandbox 标准集 + MCP</td></tr>
+    <tr><td>模型</td><td>pi-ai providers</td><td>pi-ai providers（同一份 0.83.0）</td></tr>
+    <tr><td>durability</td><td>compaction/恢复是 coding-agent 内部</td><td>受理契约/attempt/step.do 是公共契约（0009）</td></tr>
+    <tr><td>定位</td><td>编码 agent 产品的底座</td><td>任意 product agent 的可编程 harness（render 化）</td></tr>
+  </table>
+  <span class="cite">对照 /Users/junyingli/project/tools/pi 与 /Users/junyingli/project/tools/flue 两个 monorepo</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>同源图：一棵树，两棵 harness</h2>
+  <div class="flow">
+    <div class="node stack">pi-ai（provider/模型层）<span class="badge">共同地基</span><small>catalog · createProvider · 流式运输 · usage</small></div>
+    <div class="arrow">↑ 长在上面，各用各法</div>
+    <div class="node stack">pi-agent-core（agent 核心与类型）<small>flue 只取类型形状</small></div>
+    <div class="arrow">↕</div>
+    <div class="node hot">pi coding-agent<small>命令式 harness：session/loop/资源/compaction</small></div>
+    <div class="node hot">flue<small>声明式 harness：render/submission/durability</small></div>
+  </div>
+  <p>同一棵树的两种摘法：coding-agent 面向「在终端里跑一个会写代码的 agent 会话」（OpenClaw 系列）；flue 面向「把 agent 当成产品里可编程、可 durable 的函数」。你两个都学了——这是很少见的双视角：<b>既见过 pi 的 loop/资源层，又能看见 flue 在它上面怎么叠 render 与受理契约</b>。</p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>workflow-console 该站在哪层</h2>
+  <p>你的 flue-workflow-console 是一个<b>编排记录层</b>：保存任意工作流 DSL（steps + dependsOn + skill 名），执行交给 agent（flue skill §6 明言：「Runtime 只做编排记录，真实执行交给 agent」）。用本课的轴把它钉清楚：</p>
+  <ul>
+    <li><b>它不该重造循环/会话/durability</b>——那些是 flue（或 pi）已经交付的 L2。</li>
+    <li><b>它该消费「入口即提交」的抽象</b>：像 stylist 的 <code>/internal/*</code> dispatch 端点——每个工作流 step = 一次 durable submission（确定性会话 id + signal + attributes + 回执）。失败重跑 = 0009 的受理契约替你兜，不是 console 自己写。</li>
+    <li><b>skill 名解析</b>：console 里 DSL 的 skill 是「可发现即可执行」——落在 <code>~/.pi/agent/skills</code> 或项目 skills 目录的 agentskills 格式（0006 课），真正跑的时候由执行 agent 用 useSkill/读 SKILL.md 履行。你的两套生态（pi skills + flue agents）通过格式共用而互通。</li>
+    <li><b>决策建议</b>：若 step 的活是「给产品 agent 发 durable 任务」→ flue dispatch；若活是「起一个编码会话在仓库里改代码」→ 那更接近 coding-agent 的领地。console 站在两者之上的 DSL 层，与两家解耦、只调用执行入口——这正是它现在的设计。</li>
+  </ul>
+  <span class="cite">flue-flow skill（Runtime 编排记录协议）· stylist-agent/flue/src/app.ts（/internal/* dispatch）· /Users/junyingli/project/AI/flue-workflow-console</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "flue 从 pi 家族依赖了哪两个包？",
+          "options": ["agent 与 coding-agent 包", "pi-ai 与 pi-agent-core", "client 与 session-backends", "ai 与 protocol 两个包"],
+          "answer": 1,
+          "explain": "依赖 pi-ai（模型层）与 pi-agent-core（agent 核心）；不依赖 coding-agent。"
+        },
+        {
+          "q": "flue 从 pi-agent-core 拿到什么？",
+          "options": ["完整的 agent-loop 实现", "只有消息与工具类型", "会话与压缩的引擎", "终端渲染组件"],
+          "answer": 1,
+          "explain": "import 全是 type：AgentMessage/AgentTool 形状；loop 是 flue 自建。"
+        },
+        {
+          "q": "flue 复用了 pi-ai 的哪部分？",
+          "options": ["render 与帧机制", "provider 与流式运输", "HTTP 与 SDK 层", "会话的持久存储"],
+          "answer": 1,
+          "explain": "createProvider/catalog/transport/isContextOverflow 等都是 pi-ai 的。"
+        },
+        {
+          "q": "stylist import pi-ai 写 createProvider 算什么？",
+          "options": ["危险的跨框架乱接", "直接用了 flue 的底层库", "临时绕过官方 API", "复制粘贴的坏味道"],
+          "answer": 1,
+          "explain": "pi-ai 就是 flue 的模型层——同一份 0.83.0，正路。"
+        },
+        {
+          "q": "workflow-console 最该消费的抽象是？",
+          "options": ["自己写的重试循环", "入口即提交的 dispatch", "重造会话持久层", "直接读 provider 流"],
+          "answer": 1,
+          "explain": "每个 step 当一次 durable submission 消费，恢复交给 flue 兜。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：能用一张同源图 + 一张对照表讲清两台机器——共享 pi-ai 地基，coding-agent 是命令式 harness、flue 是声明式 render harness；你的 console 站在「入口即提交」的抽象上，与两家解耦。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 14 课「provider 与模型层细节」</strong><br>
+  阶段④进阶扩展开篇。钻进 usage.ts / provider-diagnostics.ts / runtime/providers.ts：pi-ai 运输层怎么被归一化、诊断怎么穿透、多 provider 路由与元数据如何决定 compaction/thinking/模态。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你哪块想从 coding-agent 搬进 flue、或 console 某个 step 该走 dispatch 还是该起编码会话——回来用 §5 的轴判断。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 13 课 · 对照仓库：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="https://pi.dev" target="_blank">pi</a> · <a href="../reference/glossary.html">术语表</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

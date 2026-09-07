@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 12 课 · 案例课：stylist-agent</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 12 课 · flue 架构深潜 · 阶段③ 案例与对照</p>
+  <h1>案例课：stylist-agent——一座双层架构</h1>
+  <p class="subtitle">读完这一课，你能用前 11 课的心智模型拆开你自己的 stylist：provider 桥接、最少权限 agent、durable 工具、双层校验、dispatch-only 端点——以及它们为什么这么配。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 11 课。",
+      "questions": [
+        {
+          "q": "HTTP 投递消息后回什么？",
+          "options": ["阻塞等完整回复", "202 受理带坐标", "同步返回最终文本", "505 需要重试指令"],
+          "answer": 1,
+          "explain": "durably 受理即 202 fire-and-forget。"
+        },
+        {
+          "q": "会话身份键控在什么上？",
+          "options": ["挂载 URL 路径", "durable identity", "前端随机字符串", "进程内存地址"],
+          "answer": 1,
+          "explain": "函数名/agentName，非 URL。"
+        },
+        {
+          "q": "flue run 引导走什么路径？",
+          "options": ["临时 HTTP 服务", "真实 durable 管线", "直接调 SDK 客户端", "一套内存简化逻辑"],
+          "answer": 1,
+          "explain": "共享装配 + durable 受理 + canonical 流看 settle。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>项目拓扑：一座双层架构</h2>
+  <p>stylist 不是一个"纯 flue 应用"，而是两套运行时共享同一份业务代码：</p>
+  <pre><code>stylist-agent/
+├─ server/            ← 你原来的业务服务（Express）
+│  ├─ config.ts         config.json + ~/.pi/agent/models.json 读密钥
+│  ├─ tools.ts          【业务工具注册表】11 个工具：Zod schema + 真实 handler + 规则引擎
+│  ├─ ootd.ts / rules.ts / plans.service.ts / …  业务逻辑
+│  └─ index.ts / routes/ / scheduler.ts / llm.ts   老的服务面（聊天/上传/cron）
+└─ flue/              ← 本课解剖的 flue 子工程
+   ├─ vite.config.ts    flue() 插件
+   ├─ src/app.ts        provider 注册 + 3 个 router + 2 个 dispatch-only 端点
+   └─ src/agents/       3 个薄 agent（stylist / daily-outfit / photo-review）
+       + src/tools.ts   flue 侧工具适配器（valibot schema + 委托 server 注册表）</code></pre>
+  <p>关键点：flue 把 import 的 server 模块<b>打包进 flue/dist</b>，但 config.ts 特意优先读进程工作区的 <code>config.json</code>——让两套运行时读同一份配置与数据目录（<code>server/config.ts</code> 头注释）。<br>
+  <span class="cite">stylist-agent/flue/src/app.ts · server/config.ts</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>provider 桥接：pi-ai 的 createProvider 直进 flue</h2>
+  <p>app.ts 顶部的 <code>setProvider(createProvider({ id:'opencode-luna', … }))</code>——这正是 0004 课「Custom providers」的实盘。你要点不是"注册了个模型"，而是：</p>
+  <ul>
+    <li>provider 是 <b>pi-ai 自己的对象</b>，flue 直接收：因为你 import 的 <code>@earendil-works/pi-ai</code> 与 <code>@flue/runtime</code> 内部依赖的 pi-ai 是<b>同一份 0.83.0</b>（第 13 课展开）。</li>
+    <li>模型元数据<b>深思熟虑</b>：<code>reasoning:false</code>（DeepSeek 关 thinking 提速）、<code>compat.thinkingFormat:'deepseek'</code>（reasoning_content 流）、<code>contextWindow:1_048_576</code>、vision 模型 <code>input:['text','image']</code>。runtime 就靠这些决定 compaction 阈值、thinking 是否上 wire、能不能收图。</li>
+    <li>密钥解析 <code>apiKey.resolve()</code> 走 <code>server/config.ts</code>：env（GLM_API_KEY/ZHIPU_API_KEY）&gt; <b>~/.pi/agent/models.json 的 opencode-luna apiKey</b>——你把 pi 生态的模型配置当成了 flue 的凭证源，两套 agent 系统共享一套 key 治理。</li>
+  </ul>
+  <span class="cite">stylist-agent/flue/src/app.ts · server/config.ts（opencodeLunaApiKey）</span></p>
+
+  <div class="sidenote">agent 侧只要 <code>useModel('opencode-luna/deepseek-v4-flash-vision-exp')</code>——specifier 解析到你在 app.ts 注册的 provider。没这步注册，跑起来就是 0004 课那句 <code>Provider is not configured</code>。</div>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>agent 组织：薄函数 + 最少权限 + 参数化注册器</h2>
+  <p>三个 agent 每个只有 14–27 行：useModel + 调注册器选工具 + 返回指令。这是 0005 课「没挂载的工具模型根本调不到」的刻意运用——<b>按任务面分配最少工具</b>：</p>
+  <pre><code>// daily-outfit.ts —— 只读 3 个 + 1 个 durable 写
+registerBusinessTools(['get_profile','query_wardrobe','get_weather']);
+registerDurableBusinessTools(['generate_outfit']);
+DailyOutfit.agentName = 'daily-outfit';
+DailyOutfit.durability = { maxAttempts: 3, timeoutMs: 120_000 };</code></pre>
+  <p><code>registerBusinessTools(names[])</code> 是<b>参数化的自定义 hook</b>（体内批量调 useTool）——0003 课自定义 hook 的实盘：把「schema 表 + 委托 execute」抽成可复用注册器。循环里按 name 查本地 valibot schema 与 server 注册表，找不到就抛（fail fast）。<code>agentName</code> 钉住身份（改名不迁移库）。<br>
+  <span class="cite">stylist-agent/flue/src/agents/daily-outfit.ts · src/tools.ts</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>durable 工具：step.do 用得对</h2>
+  <p>看注册器的 durable 分支——这是 0005/0009 课规则的教科书式执行：</p>
+  <pre><code>useTool({
+  name, input: schema,
+  description: `${tool.description} 这是写操作，必须安全重试。`,   // ← 语义写给模型
+  durable: true,
+  async run({ data, step }) {
+    const output = await step.do(`${name}:${JSON.stringify(data)}`, () =&gt; execute(name, data));
+    return { output };
+  },
+});</code></pre>
+  <ul>
+    <li><b>名字确定性</b>：<code>`${name}:${JSON.stringify(data)}`</code>——同参数重试解析到同一 step，回放不重跑；绝无随机/时间。</li>
+    <li><b>写操作 = durable</b>：generate_outfit / log_outfit_feedback / create_photo_plan / review_photo_session 归到写分支；读操作走普通工具（中断 settle unknown，让模型重试读无害）。</li>
+    <li><b>description 把语义给模型</b>：「这是写操作，必须安全重试」——模型看到的是可理解的行为约定，不是实现。</li>
+    <li><b>durability 逐 agent 配</b>：daily-outfit 120s（轻任务快失败）、photo-review 600s（复盘跑得久）、stylist 300s。三档 timeout 都是「宁快失败让人重试」的 0009 决策。</li>
+  </ul>
+  <span class="cite">stylist-agent/flue/src/tools.ts（registerDurableBusinessTools）· 0005 §5 · 0009 §4</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>双层校验与防编造：机制级 anti-hallucination</h2>
+  <p>server/tools.ts 的注册表注释把架构意图说得很透：每个工具保留 <b>Zod</b> 参数校验与真实业务 handler；flue adapter 把模型参数交给这里做<b>第二层校验</b>，「确保模型不能绕过规则引擎编造衣橱数据」。关键原则：</p>
+  <blockquote>所有涉及真实数据（衣橱/档案/穿搭）的操作都只能通过工具完成——模型拿到的永远是工具返回的事实，从<b>机制上</b>杜绝编造单品 ID。</blockquote>
+  <p>对应 0005 §7「参数不是授权边界」：不让模型选它不能选的值（客户/数据范围由 trusted 代码定），stylist 把它升级成「模型根本不接触数据源，只碰工具的返回值」。flue 侧 valibot schema 是给模型看/首层校验，server 侧 Zod 是真校验——双 schema 是这套机制的代价（可后续统一）。<br>
+  <span class="cite">server/tools.ts（注册表头注释）· src/tools.ts（valibot 镜像）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>交互面：三种入口各司其职</h2>
+  <ul>
+    <li><b>createAgentRouter ×3</b>：<code>/stylist</code>、<code>/daily-outfit</code>、<code>/photo-review</code>——给互动对话（聊天/多轮）用。</li>
+    <li><b>dispatch-only 内部端点</b>：<code>POST /internal/daily-outfit</code> / <code>/internal/photo-review</code>——给老 Express 服务与 cron 用。看它怎么选会话 id：<code>id: \`daily:${date}\`</code>、<code>id: \`photo-review:${planId}\`</code>——<b>确定性 id = 天然幂等键</b>：同一天重投递续同一会话，不重复生成。消息是 <code>signal</code>（结构化事件，带 attributes），202 受理即回——0009 课「受理契约」的实盘。</li>
+  </ul>
+  <span class="cite">stylist-agent/flue/src/app.ts（/internal/* dispatch）· 0009 §1 · 0011 §5</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>复盘：哪些决策与课程心智模型严丝合缝</h2>
+  <table>
+    <tr><th>你做的决策</th><th>对应课程机制</th><th>一句话 why</th></tr>
+    <tr><td>每 agent 只挂任务所需工具</td><td>0005 §6 条件/最少工具</td><td>未挂载的工具模型调不到 = 更强的保证</td></tr>
+    <tr><td>写操作 durable + 确定性 step 名</td><td>0009 §5</td><td>崩溃重试不重复副作用</td></tr>
+    <tr><td>durability 逐 agent 3 档 timeout</td><td>0009 §4</td><td>宁快失败让用户/调度重试</td></tr>
+    <tr><td>setProvider(pi-ai createProvider)</td><td>0004 §5 · 0013</td><td>元数据驱动 compaction/thinking/模态</td></tr>
+    <tr><td>agentName 钉身份</td><td>0002 §1</td><td>改名不迁移会话库</td></tr>
+    <tr><td>确定性会话 id（daily:date）</td><td>0009 §1</td><td>重投递续同一会话 = 幂等</td></tr>
+    <tr><td>signal + attributes 内部端点</td><td>0011 §5</td><td>dispatch-only agent 无需挂载也能被驱动</td></tr>
+  </table>
+  <p><b>可改进的缝</b>（供思考，非批评）：长系统提示可拆成 skills（渐进披露省 token）；双份 schema（valibot/Zod）有重复成本，可考虑单向生成；「确认后才能入库」这类一次性动作目前靠指令，按 0009 §7 更稳的是持久状态守卫。<br>
+  <span class="cite">stylist-agent/flue 全量 · 对照 0005/0009/0011</span></p>
+
+  <!-- ============ 8 ============ -->
+  <h2><span class="secno">§8</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "stylist 的模型 provider 从哪来？",
+          "options": ["flue 内置默认全集", "pi-ai createProvider 注册", "OpenAI 官方直连渠道", "server 启动时硬编码"],
+          "answer": 1,
+          "explain": "app.ts setProvider(createProvider({id:'opencode-luna',...}))——自定义 provider。"
+        },
+        {
+          "q": "写工具套 step.do 的名字怎么取？",
+          "options": ["随机数加时间戳", "工具名加参数序列化", "递增的全局计数器", "只用固定工具名字"],
+          "answer": 1,
+          "explain": "`${name}:${JSON.stringify(data)}`——确定性，重试解析同一步。"
+        },
+        {
+          "q": "stylist 靠什么防模型编造单品？",
+          "options": ["提示词严厉禁止", "机制级只给工具返回", "前端二次人工确认", "用更强闭源模型"],
+          "answer": 1,
+          "explain": "真实数据只经工具返回，模型从机制上碰不到数据源。"
+        },
+        {
+          "q": "cron 触发每日穿搭为何用确定性 id？",
+          "options": ["方便前端记住路径", "重投递续同一会话幂等", "数据库主键必需整数", "让日志更容易排序"],
+          "answer": 1,
+          "explain": "daily:date 同一天重投递续同一会话，不重复生成。"
+        },
+        {
+          "q": "三个 agent 为何各自挂不同工具子集？",
+          "options": ["减少打包体积", "最少权限模型调不到", "让模型更少思考", "满足 lint 规则"],
+          "answer": 1,
+          "explain": "未挂载的工具模型调不到——比指令更强的约束。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：能把 stylist 的每个决策钉到课程机制上（最少工具/durable step/元数据 provider/确定性 id/机制级防编造），并指出它的改进缝。你写的不是"样例"，是活的架构标本。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 13 课「架构对照：flue vs pi」</strong><br>
+  阶段③收束。你学过 pi 的 agent 循环，又在 flue 上建了 product——这课把两台机器并排：pi 的 loop/工具/上下文 vs flue 的 render/submission/durability，以及 workflow-console 该站在哪层。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你那 11 个业务工具里哪个其实该拆成技能、或想给某 agent 换 durable 参数却不确定副作用幂等——拿真实决策来复盘。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 12 课 · 案例：<code>/Users/junyingli/project/AI/stylist-agent/</code> · <a href="../reference/glossary.html">术语表</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

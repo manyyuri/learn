@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 2 课 · render 模型拆解</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 2 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>render 模型拆解：一次 render 到底发生了什么</h1>
+  <p class="subtitle">读完这一课，你能沿着调用链说清「agent 函数 → <code>'use agent'</code> 打包 → 渲染帧 → 调用配置」——render 不是魔法，是一条普通函数调用。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索：上一课还立着吗</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "凭记忆作答，别翻 0001。",
+      "questions": [
+        {
+          "q": "agent 函数返回的字符串是什么？",
+          "options": ["模型生成的最终回复", "该 agent 的系统指令", "给工具调用的参数", "会话持久化的快照"],
+          "answer": 1,
+          "explain": "返回值 = 系统指令（system prompt），交给模型；最终回复是模型的产出。"
+        },
+        {
+          "q": "一次『被接受的输入』在运行时里叫什么？",
+          "options": ["一次提交 submission", "一次轮询 polling", "一次渲染 render", "一次会话 session"],
+          "answer": 0,
+          "explain": "submission = 一次被接受的、可重放的工作；模型/tooling 等配置是 submission 作用域的。"
+        },
+        {
+          "q": "flue 复用 pi 的哪一层？",
+          "options": ["render 与帧机制", "会话与持久化层", "模型与 provider 层", "HTTP 与 SDK 层"],
+          "answer": 2,
+          "explain": "复用 pi-ai 的模型/provider 层与 pi-agent-core 的消息/工具类型；其余是 flue 自建。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>从函数到 agent：'use agent' 打包</h2>
+  <p>你在 <code>agents/headroom.ts</code> 里写 <code>'use agent'</code> + <code>export function Headroom()</code>——构建时会发生三件事：</p>
+  <ol>
+    <li><b>扫描</b>：vite 插件扫到带指令的模块，把每个导出的首字母大写函数登记为 agent。</li>
+    <li><b>变换</b>：<code>@flue/vite</code> 的 <code>use-agent-transform</code> 给模块<b>追加</b>一行，对每个 agent 调用 <code>__flueBindAgentModule(agentFn, { identity })</code>。</li>
+    <li><b>绑定时机</b>：绑定在<b>模块求值期</b>执行——所以 <code>app.ts</code> 能边求值边 <code>createAgentRouter(agent)</code>；identity 作为<b>构建期字符串字面量</b>打进产物，压缩混淆后身份也不丢。</li>
+  </ol>
+  <span class="cite">vite/src/use-agent-transform.ts（append 一个 self-import + 逐 agent 绑定调用）· guide/building-agents.md（'use agent' Directive）</span>
+
+  <div class="sidenote">identity 与函数名解耦的意义，正是 Headroom 里 <code>agentName</code> 在做的事：改名不迁移数据库。第 11 课（运行时接口）会看到 <code>agentName</code> 对应到哪一步。</div>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>一次 render 的内部：一条同步调用</h2>
+  <p>运行时真正执行渲染的代码只有一行——把 agent 函数放进「新帧」里调用：</p>
+  <pre><code>const { result, frame } = renderWithFrame(() =&gt; agent(props), state);</code></pre>
+  <p>由此可推出四条硬性约束（源码里都有显式断言）：</p>
+  <ul>
+    <li><b>props = { id }</b>：运行时把实例 id 作为 props 传入；无实例支撑的裸渲染（测试/工具）里读 <code>props.id</code> 会抛错。</li>
+    <li><b>函数必须同步</b>：返回 Promise 直接报错——「async 工作移到工具、动作或资源工厂里」，不要在 agent 函数体 await。</li>
+    <li><b>返回值只能是 string 或 undefined</b>：其它一切（模型、沙箱、工具）都靠函数体里的 hooks 组合。</li>
+    <li><b>执行后校验</b>：指令合法性 + <b>工具名唯一</b>（重复、或撞框架保留名 <code>task</code>/<code>activate_skill</code> 都抛 <code>ToolNameConflictError</code>）。</li>
+  </ul>
+  <span class="cite">runtime/src/hooks/render.ts（renderAgentFunctionWithStructure）· runtime/src/hooks/frame.ts</span>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>hook 凭什么"注册"：渲染帧（render frame）</h2>
+  <p>帧是<b>模块级全局 slot</b>——agent 函数运行的这段时间里，hooks 对着它解析并落盘。frame.ts 明说这是「与 Preact 的 <code>currentComponent</code> 同一纪律」：agent 函数是同步的，单 slot 永不交错；帧为空（在工具/事件/模块作用域里调 hook）就抛错。</p>
+  <p>所有注册<b>按调用顺序扁平落帧</b>：自定义 hook 只是普通函数，所以 <code>useEscalation()</code> 里调的 hooks，记录得就像 agent 主体直接调用一样。帧上收集的东西就是渲染的「原料」：model、instructions 追加、tools、skills、subagents、mcpConnections、sandbox、cwd、thinkingLevel、compaction、stateNames、messageDataNames、四组事件回调……<br>
+  <span class="cite">runtime/src/hooks/frame.ts（requireRenderFrame 纪律）· guide/agent-hooks.md（Custom hooks）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>渲染的产物：调用配置 + 结构指纹</h2>
+  <p>渲染完，runtime 把帧映射成两样东西：</p>
+  <p><b>① 调用配置（AgentRuntimeConfig）</b>——给「这一轮模型调用」用的一份配置：模型、组装好的指令、工具集、沙箱、技能、子代理、MCP、thinking/compaction。指令文档的拼法有定式：<b>函数 return 的指令在前，<code>useInstruction</code> 的贡献按调用顺序在后，空行拼接</b>（runtime 只负责 join，格式你负责）。<br>
+  <span class="cite">runtime/src/hooks/render.ts（config 组装 + composeAgentDocument）</span></p>
+  <p><b>② 结构指纹（AgentRenderStructure）</b>——跨 turn 比较用，决定「什么变了要告诉模型、什么变了是身份违规」：</p>
+  <table>
+    <tr><th>声明类别</th><th>可变性</th><th>机制</th></tr>
+    <tr><td>messageDataNames（useDataWriter 的名字）</td><td><b>不可变</b></td><td>响应客户端身份，两 turn 不一致 = 抛错</td></tr>
+    <tr><td>resources（tools/skills/subagents）</td><td>动态</td><td>会话 diff 前后快照，把增删改「旁白」给模型</td></tr>
+    <tr><td>usePersistentState 的名字</td><td>条件友好</td><td>存储按 name 键控，缺席只是没碰</td></tr>
+    <tr><td>事件 hooks（use*Start/Finish）</td><td>条件自由</td><td>每轮渲染声明什么就跑什么，不指纹</td></tr>
+    <tr><td>sandbox</td><td>仅看「在不在」</td><td>presence 翻转在 turn 边界换环境，绝不中途换</td></tr>
+  </table>
+  <span class="cite">runtime/src/hooks/render.ts（AgentRenderStructure + assertRenderStructureInvariance）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>"每轮重渲染"到底意味着什么</h2>
+  <p>0001 的地图说「每次调用模型前重跑函数」——现在你能说清后果了：</p>
+  <ul>
+    <li><b>指令永远新鲜</b>：函数内插了持久状态/时间/数据，每次重跑都重建，模型看到的是当下状态（代价：动态内容会打爆 provider 的 prompt cache，生产上要克制）。</li>
+    <li><b>工具集是"每轮从零声明"</b>：工具存在与否只是普通程序逻辑——<code>if (approved) useTool(publish)</code>，没挂载的工具模型根本调不到，比"指令里说不许用"强得多。</li>
+    <li><b>变化由会话旁白</b>：工具集/技能增删时，运行时在下个 turn 边界给模型一条 <code>resources</code> 信号（"新工具可用：…"），让转录保持自洽。</li>
+    <li><b>换了也是"下个 submission 才生效"</b>：模型/tooling/compaction 是 submission 作用域——中途重渲染算出的新值，锁存到下一次提交才生效。</li>
+  </ul>
+  <span class="cite">guide/tools.md（Conditional tools）· guide/agent-hooks.md（re-renders on every model call）· runtime/src/hooks/use-model.ts（submission-scoped）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "『use agent』变换在何时绑定 agent 身份？",
+          "options": ["模块求值期自动绑定", "第一次对话时才绑定", "应用启动路由时绑定", "构建产物压缩前绑定"],
+          "answer": 0,
+          "explain": "绑定调用在模块求值期执行（transform 追加的代码），所以 app.ts 求值阶段就能 createAgentRouter。identity 作为字符串字面量打进产物。"
+        },
+        {
+          "q": "agent 函数体里能写 async/await 吗？",
+          "options": ["可以随意使用异步", "不能，render 必须同步", "只能在 return 里使用", "hooks 内部才可以异步"],
+          "answer": 1,
+          "explain": "agent 函数必须同步，返回 Promise 直接报错。异步工作放进工具、动作或资源工厂。"
+        },
+        {
+          "q": "hook 之所以能『注册能力』靠的是什么？",
+          "options": ["全局单例对象注册表", "构建期静态分析注入", "渲染期的模块级帧 slot", "数据库里的能力清单"],
+          "answer": 2,
+          "explain": "render frame = 模块级全局 slot（Preact currentComponent 纪律），agent 同步执行期间 hooks 对着它落盘。"
+        },
+        {
+          "q": "指令文档的拼装顺序是？",
+          "options": ["工具描述在前再加指令", "return 指令在前再拼追加", "追加指令在前再加 return", "只有 return 没有追加指令"],
+          "answer": 1,
+          "explain": "return 的指令在前，useInstruction 贡献按调用顺序在后，空行 join；runtime 只 join，格式作者负责。"
+        },
+        {
+          "q": "跨 turn 不能变的是哪一类声明？",
+          "options": ["工具工具集的成员", "技能技能集的成员", "消息数据的名字集", "沙箱是否被挂载"],
+          "answer": 2,
+          "explain": "messageDataNames 是响应的客户端身份，两 turn 不一致抛错；resources/sandbox 可变，由会话 diff 旁白。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：现在你能回答「render 不是魔法，为什么不是」——它是 runtime 把 agent 函数放进帧里的一次同步调用，产物是一份调用配置 + 一份结构指纹，后者决定了哪些变化会被旁白、哪些变化是违规。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 3 课「hook 索引」</strong><br>
+    逐个过 20 个 <code>use*</code>：组合 vs 状态 vs 生命周期，各注册什么、何时生效、何时不可用（比如 subagent 帧里哪些被禁）——建立一张随时可查的分类卡。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如：渲染帧里"为什么一个模块级 slot 不会交错"、"identity 字符串化后我 renaming 函数会怎样"、或你项目里某段 hook 属于哪类声明——直接问我。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 2 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>packages/vite/src/use-agent-transform.ts</code> · <code>packages/runtime/src/hooks/render.ts</code> · <code>hooks/frame.ts</code></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>术语表 · flue 架构深潜</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">参考文档 · flue 架构深潜 · 术语表</p>
+  <h1>术语表（Glossary）</h1>
+  <p class="subtitle">本课程所有课程、参考文档使用的统一译法。英文术语首次出现一律「中文（English）」；标 <code>L</code> 的条目后续课程会补详。术语会随课程推进持续新增。</p>
+
+  <nav>
+    <p><b>目录：</b>
+      <a href="#core">核心心智</a> · <a href="#hooks">hooks 分类</a> · <a href="#mechanism">机制层</a> · <a href="#interfaces">接口层</a> · <a href="#foundation">地基</a>
+    </p>
+  </nav>
+
+  <!-- ================= core ================= -->
+  <h2 id="core"><span class="secno">A</span>核心心智（Core mental model）</h2>
+
+  <h3 id="agent-function">agent 函数（agent function）</h3>
+  <p>代表一个 agent 的普通 JS/TS 函数：返回该 agent 的<span class="term">系统指令<span class="en">（system prompt instructions）</span></span>文本。在 flue 中「agent 就是函数」，不是配置对象。函数名默认成为 agent 的持久身份（见 <a href="#agent-name">agentName</a>）。<br>
+  <span class="cite">guide/building-agents.md · runtime/src/hooks/render.ts</span></p>
+
+  <h3 id="render">渲染 / 重渲染（render / re-render）</h3>
+  <p>执行一次 agent 函数并收集其声明的过程。函数<b>每个 turn（每次要调用模型前）都会重跑</b>，像 React 组件的 render——返回的指令永远反映当下状态。渲染期间 hooks 把能力落到一个「渲染帧」上。<br>
+  <span class="cite">guide/building-agents.md「re-renders on every turn」· runtime/src/hooks/frame.ts</span></p>
+
+  <h3 id="hook">hook</h3>
+  <p>在 agent 函数体内调用的普通函数，给 agent 加一种能力，名字都以 <code>use</code> 开头（<code>useModel</code> / <code>useTool</code> / <code>useSkill</code> / <code>useSandbox</code> 等）。只能在 render 期间调用。<br>
+  <span class="cite">guide/agent-hooks.md · runtime/src/hooks/*</span></p>
+
+  <h3 id="turn">turn / 提交（submission）</h3>
+  <p>一次「把一条投递消息喂给 agent、直到产出一条回复」的执行单元。提交开始时先做首渲染；每轮模型调用前会重渲染。若干「turn/轮」组成一次 <code>submission</code>（一次被接受的工作，可重放）。<br>
+  <span class="cite">runtime/src/client.ts（submission-scoped）</span></p>
+
+  <h3 id="harness">harness（工具套件层）</h3>
+  <p>模型之外的整套「干活环境」：工具、技能、指令、文件系统/沙箱，以及支撑自主工作的会话与持久化。flue 的核心理念是 <b>harness-first</b>——harness 是框架本体，不是某个功能。构建 agent 的三要素：<b>LLM × harness × 专精上下文</b>。<br>
+  <span class="cite">guide/why-flue.md · guide/building-agents.md</span></p>
+
+  <h3 id="use-agent">"use agent" 指令（directive）</h3>
+  <p>写在模块顶部的字符串（类似 <code>'use client'</code>）。构建时 flue 扫描带此指令的文件，把每个导出的首字母大写函数注册成 agent。注册 = 可被 <code>dispatch</code> / HTTP 路由寻址。<br>
+  <span class="cite">guide/building-agents.md · packages/vite/src/use-agent-transform.ts</span></p>
+
+  <h3 id="agent-name">agentName / agent 身份（identity）</h3>
+  <p>函数导出名 = agent 的持久身份，用来键控其在存储里的会话。重命名函数不改数据库时，用静态属性 <code>TriageAgent.agentName = 'triage-agent'</code> 钉住身份。<br>
+  <span class="cite">guide/building-agents.md · guide/reference/agent-api（Agent statics）</span></p>
+
+  <h3 id="instance">agent 实例 / 会话 ID（instance / id）</h3>
+  <p>agent 总以一个 <b>ID</b> 初始化（<code>--id</code>、POST 的 <code>/:id</code>、或 <code>dispatch</code> 的 <code>id</code>），ID 的含义由你定（用户 ID、工单号……）。实例按 ID 持久化，可跨时间继续对话。<br>
+  <span class="cite">guide/building-agents.md</span></p>
+
+  <!-- ================= hooks ================= -->
+  <h2 id="hooks"><span class="secno">B</span>hooks 分类（可另见 <a href="0001-panoramic-map.html#hooks-taxonomy">第 1 课 §3</a>）</h2>
+
+  <h3 id="use-model">useModel / provider / 模型说明符（model specifier）</h3>
+  <p>声明 agent 用的模型，如 <code>'anthropic/claude-sonnet-4-6'</code>。每次 render 恰好调用一次；参数可随状态变化（但调用不能消失）。值是 <b>submission 作用域</b>：提交开始时读取，本次运行中途不变。不带 <code>useModel</code> 的 render 无法开始。<br>
+  <span class="cite">runtime/src/hooks/use-model.ts · guide/models.md</span></p>
+
+  <h3 id="use-instruction">useInstruction</h3>
+  <p>往系统指令里追加一段文字，作为 <code>return</code> 的补充贡献（按调用顺序并入最终指令文档）。<br>
+  <span class="cite">runtime/src/hooks/use-instruction.ts</span></p>
+
+  <h3 id="use-tool">useTool / 工具（tool / ToolDefinition）</h3>
+  <p>给 agent 一个可调用的动作：名字 + 描述 + 输入 schema（valibot）+ <code>run</code>。工具可在工具内改持久状态、触发解锁其它工具。能力可以条件增减。<br>
+  <span class="cite">runtime/src/hooks/use-tool.ts · guide/tools.md</span></p>
+
+  <h3 id="use-sandbox">useSandbox / 沙箱（sandbox）</h3>
+  <p>给 agent 一个文件系统与命令执行环境（本地 <code>local()</code>、虚拟、或远程容器）。标准模型侧工具（bash/edit/read/write/grep/glob…）挂在沙箱的 <code>tools</code> 列表上。<br>
+  <span class="cite">runtime/src/hooks/use-sandbox.ts · runtime/src/agent.ts · guide/sandboxes.md</span></p>
+
+  <h3 id="use-skill">useSkill / 技能（skill / SKILL.md）</h3>
+  <p>挂载一个 <a href="https://agentskills.io" target="_blank">agentskills</a> 格式的 SKILL.md（目录 + frontmatter，name 须等于目录名）。SKILL.md 通过<b>静态 import</b> 挂载（动态 import 是构建错误）。<br>
+  <span class="cite">runtime/src/hooks/use-skill.ts · packages/vite/src/markdown-import-plugin.ts · guide/skills.md</span></p>
+
+  <h3 id="use-subagent">useSubagent / 子代理（subagent / delegate）</h3>
+  <p>让 agent 把专项工作委派给另一个 agent 函数（delegate）。delegate 在父级 <code>useSubagent</code> 定义上声明自己的模型；delegate 渲染是 <code>subagent</code> 帧，不能 <code>usePersistentState</code> / <code>useSandbox</code>（共享父级环境）。<br>
+  <span class="cite">runtime/src/hooks/use-subagent.ts · guide/subagents.md</span></p>
+
+  <h3 id="use-persistent-state">usePersistentState / 持久状态（persisted state）</h3>
+  <p>签名像 <code>useState</code>，但值<b>持久</b>：每次写入都记录进会话存储，每次 render 读到最新值——跨 turn、跨重启、贯穿整个会话。值须 JSON 可序列化，按 name 键控。用 updater 函数 <code>(prev) =&gt; …</code> 而非读渲染快照。<br>
+  <span class="cite">guide/agent-hooks.md「Persisted state」· runtime/src/hooks/use-persistent-state.ts</span></p>
+
+  <h3 id="event-hooks">事件 hooks（event hooks）</h3>
+  <p>在生命周期固定时点注册回调：<code>useResponseStart</code> / <code>useAgentStart</code>（每次收到消息都跑，async，适合加载数据）/ <code>useAgentFinish</code> / <code>useResponseFinish</code>。回调<b>至少执行一次</b>——完成的工作会持久提交、绝不重复，被打断会重试；所以「不能做两次」的事要用持久状态兜底。<br>
+  <span class="cite">guide/agent-hooks.md「Event hooks」</span></p>
+
+  <h3 id="custom-hook">自定义 hook（custom hook）</h3>
+  <p>把若干 <code>use*</code> 声明抽成自己命名的函数（以 <code>use</code> 开头），像 React 那样组合、跨 agent 复用（如一个打包好工具/技能/指令的 <code>useGitHub()</code>）。<br>
+  <span class="cite">guide/agent-hooks.md「Custom hooks」</span></p>
+
+  <h3 id="other-hooks">其余 hooks（L，后补）</h3>
+  <p><code>useInitialData</code>（读创建时的结构化数据）、<code>useDataWriter</code>（向客户端流式写结构化数据，模型看不见）、<code>useDelivery</code> / <code>useDispatchMessage</code>（读触发消息 / 给本 agent 实例派发）、<code>useMcpConnection</code>（挂 MCP 服务器工具）。<br>
+  <span class="cite">runtime/src/hooks/ · guide/agent-hooks.md</span></p>
+
+  <!-- ================= mechanism ================= -->
+  <h2 id="mechanism"><span class="secno">C</span>机制层（Mechanism）</h2>
+
+  <h3 id="render-frame">渲染帧（render frame）</h3>
+  <p>模块级的全局 slot——agent 函数运行期间 hooks 对着它解析并落盘（与 Preact 的 <code>currentComponent</code> 同思路）。自定义 hook 只是普通函数，所以它调的 hooks 记录得就像 agent 主体直接调用一样。帧为空时调用 hooks 会抛错。<br>
+  <span class="cite">runtime/src/hooks/frame.ts</span></p>
+
+  <h3 id="durability">持久化/可靠性（durability）</h3>
+  <p>flue 的核心卖点：每个会话都记录到<b>可重放日志</b>，被接受的活绝不丢——中断的会话在运行时回来时自动续上，客户端不从头开始。事件 hooks 的「至少一次 + 完成后不重复」由它保证。agent 静态属性 <code>durability = { maxAttempts, timeoutMs }</code> 配置。<br>
+  <span class="cite">guide/why-flue.md「Durable」· guide/durability.md · runtime/src/agent-execution-store.ts</span></p>
+
+  <h3 id="compaction">上下文压缩（compaction）</h3>
+  <p>会话过长时自动把历史压成摘要/精简表示，避免超窗口与成本失控。可经 <code>useModel</code> 的 options 关闭阈值压缩（<code>compaction: false</code>）或调配置。<br>
+  <span class="cite">runtime/src/compaction.ts · runtime/src/hooks/use-model.ts（UseModelOptions）</span></p>
+
+  <h3 id="conversation">会话 / 会话存储（conversation / storage）</h3>
+  <p>一次 agent 实例（按 ID）的全部消息与持久状态的记录。默认落在项目配置的数据库（无数据库时用本地缓存文件；CLI 本地默认 SQLite <code>run.db</code>）。可换 Postgres（<code>@flue/postgres</code>）等。<br>
+  <span class="cite">guide/building-agents.md「Conversations persist」· guide/database.md · Headroom 项目（@flue/postgres）</span></p>
+
+  <h3 id="projection">会话投影（conversation projection / events）</h3>
+  <p>运行时可把会话的实时更新（逐块文本、工具事件、数据 parts、元数据）流给订阅者/客户端——SDK 的 <code>observe</code>、HTTP 的 GET 长连接都读这个投影。<br>
+  <span class="cite">runtime/src/conversation-public.ts · packages/sdk/src</span></p>
+
+  <h3 id="dispatch">派发（dispatch）</h3>
+  <p>当应用异步收到事件（webhook、队列、聊天事件）时，把消息交给某个 agent 会话处理的方式：<code>dispatch(Agent, { id, message })</code> 立即返回回执、异步处理，不等回复。<br>
+  <span class="cite">guide/building-agents.md · guide/channels.md</span></p>
+
+  <!-- ================= interfaces ================= -->
+  <h2 id="interfaces"><span class="secno">D</span>接口层（Interfaces）</h2>
+
+  <h3 id="cli-run">flue run（CLI）</h3>
+  <p>本地直接跑一个 agent 模块：不起服务器、不构建应用。对话跨运行持久（本地缓存或配置的数据库）。常用 <code>--id</code>（命名会话以续聊）、<code>--message</code>、<code>--data</code>（initialData JSON）。<br>
+  <span class="cite">guide/building-agents.md · docs/cli/run · packages/cli/src/lib/run-bootstrap.ts</span></p>
+
+  <h3 id="http">HTTP 挂载（routing / createAgentRouter）</h3>
+  <p>把 agent 挂到你应用的路由里，每个会话有 <code>POST /agents/&lt;name&gt;/&lt;id&gt;</code>：POST 消息即发即收（202 fire-and-forget），GET 同一 URL 读事件流。需用应用自己的中间件保护。<br>
+  <span class="cite">guide/building-agents.md「HTTP」· guide/routing.md</span></p>
+
+  <h3 id="sdk">@flue/sdk（客户端 SDK）</h3>
+  <p>围绕一个会话 URL 封装整个读/写面：<code>send()</code> / <code>wait()</code> / <code>observe()</code> / <code>history()</code> 等，消费已部署 agent 的对话。<br>
+  <span class="cite">guide/building-agents.md · packages/sdk/src/public/*</span></p>
+
+  <h3 id="start-init">start() / init()（编程入口）</h3>
+  <p>在自己的 Node 进程里直接引导 flue 运行时（<code>start</code>，可给 <code>agents</code> + <code>db</code>，适合 cron/脚本/测试），再用 <code>init(Agent, { id })</code> 拿实例句柄 <code>dispatch</code>/<code>read</code>。<br>
+  <span class="cite">guide/building-agents.md「Standalone scripts」· runtime/src/agent-client.ts</span></p>
+
+  <!-- ================= foundation ================= -->
+  <h2 id="foundation"><span class="secno">E</span>地基（Foundation）</h2>
+
+  <h3 id="pi">Pi / pi.dev（flue 的地基层）</h3>
+  <p>flue 官方明言建在 Pi 之上（OpenClaw 背后的开放 agent harness）。源码证据：<code>@flue/runtime</code> 依赖 <code>@earendil-works/pi-ai</code> 与 <code>@earendil-works/pi-agent-core</code>（同版本 ^0.83.0——正是 stylist 项目直接用的 pi-ai 版本）。flue 复用其 provider/模型层与消息/工具类型，自建 render、会话、durability、HTTP/SDK 与 vite 变换。<br>
+  <span class="cite">guide/why-flue.md「Harness-first」· packages/runtime/package.json · runtime/src/usage.ts / provider-diagnostics.ts / compaction.ts</span></p>
+
+  <h3 id="valibot">valibot（输入 schema）</h3>
+  <p>flue 工具输入与 initialData 的类型运行时校验用 <code>valibot</code>（小而快的 schema 库），与 <code>@valibot/to-json-schema</code> 一起生成模型的工具 JSON schema。<br>
+  <span class="cite">packages/runtime/package.json · stylist-agent（valibot 1.0.0）</span></p>
+
+  <h3 id="mcp">MCP（Model Context Protocol）</h3>
+  <p>开放协议，把第三方工具/服务以「MCP 服务器」接入 agent（<code>useMcpConnection</code> / <code>defineMcpConnection</code>），接入认证过的外部工具生态。<br>
+  <span class="cite">guide/mcp.md · runtime/src/mcp.ts</span></p>
+
+  <h3 id="durable-streams">Durable Streams</h3>
+  <p>flue 采用的开放流式协议标准（与之相对的不自造协议）。会话事件、回复流都按其语义表达。<br>
+  <span class="cite">guide/why-flue.md「Open」· docs（durable streams 参考页）</span></p>
+
+  <footer>
+    <p>flue 架构深潜 · 术语表 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="0001-panoramic-map.html">返回第 1 课</a></p>
+  </footer>
+
+</main>
+</body>
+</html>

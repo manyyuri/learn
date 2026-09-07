@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 6 课 · skill 挂载机制</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 6 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>skill 挂载机制：为什么 SKILL.md 必须静态导入</h1>
+  <p class="subtitle">读完这一课，你能讲清 skill 从「目录 + SKILL.md」到「打包进 bundle → 一行目录条目 → activate_skill 激活」的整条链路，以及为什么它和你的 pi skills 能互通。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 5 课。",
+      "questions": [
+        {
+          "q": "工具 run 的返回信封是？",
+          "options": ["直接返回裸字符串", "output 加 terminate", "必须要 JSON 字符串", "返回一个数组即可"],
+          "answer": 1,
+          "explain": "信封 { output?, terminate? }；裸 string 是简写。"
+        },
+        {
+          "q": "模型看到工具输入靠什么？",
+          "options": ["读你写的 TS 类型", "valibot 转的 JSON schema", "JSDoc 注释文档", "运行时反射原型"],
+          "answer": 1,
+          "explain": "input 是 valibot object，转成 JSON Schema 给模型。"
+        },
+        {
+          "q": "哪个框架工具始终在集内？",
+          "options": ["read 读文件工具", "bash 命令执行工具", "task 委派子代理", "glob 文件名匹配"],
+          "answer": 2,
+          "explain": "task 始终在；其余随能力在不在。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>三件套与渐进披露</h2>
+  <p>skill 打包「可复用专长」：工具执行代码，skill 教流程。每个 skill 三部分——<code>name</code>（模型激活用的短 id）、<code>description</code>（一两句：干什么 + <b>何时用</b>；这是模型唯一一直看到的部分，承载全部路由决策）、<code>instructions</code>（完整流程，激活才加载）。可带<b>支持文件</b>（checklist/模板/参考），显式读取前不加载。</p>
+  <p>核心设计是<span class="term">渐进披露<span class="en">（progressive disclosure）</span></span>：每个挂载的 skill 只花系统提示里<b>一行常驻目录条目</b>（name+description），模型判定任务匹配才激活、拿全量 instructions、按需读支持文件——一个 agent 挂几十个 skill 也不必每轮为内容付费。<br>
+  <span class="cite">guide/skills.md（What is a skill）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>frontmatter 校验</h2>
+  <p>导入或被发现的每个 SKILL.md 都按 <a href="https://agentskills.io/specification" target="_blank">Agent Skills 规范</a>校验：<code>name</code>（必填：小写字母数字连字符、≤64、<b>必须等于目录名</b>）、<code>description</code>（必填 ≤1024）、其余字段可选且大多只记录（license/compatibility/metadata/allowed-tools）。<b>未知字段忽略</b>，所以带宿主自定义字段的 skill 照样能载。<br>
+  <span class="cite">guide/skills.md（Frontmatter fields）· runtime/src/skill-package.ts</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>import 即声明：打包层在干嘛</h2>
+  <p>按模块说明符 import <code>SKILL.md</code>：构建时 vite 的 markdown-import 插件识别、校验 frontmatter、把<b>整个目录打进应用 bundle</b>。import 的值是类型化的 <code>SkillReference</code>，交给 <code>useSkill(ref)</code>。npm 包发布 SKILL.md 子路径也能 import。</p>
+  <pre><code>import refunds from '../skills/refunds/SKILL.md';
+export function SupportAgent() {
+  useModel('anthropic/claude-haiku-4-5');
+  useSkill(refunds);
+  return 'Answer customer support questions clearly and accurately.';
+}</code></pre>
+  <p>没有注册步骤、没有运行时文件拷贝——import 本身就是声明，dev / vite build / flue run 三处一致。几条规则：</p>
+  <ul>
+    <li><b>必须静态</b>：动态 <code>import('./skills/x/SKILL.md')</code> 是<b>构建错误</b>（打包期要知道目录内容）。</li>
+    <li><b>同名一次 render 一次</b>：重复挂同名字抛错。</li>
+    <li><b>打包纪律</b>：跳过 node_modules/.git/dist 等仓库噪音；>1MB 警告；<b>拒包 secrets</b>（.env、私钥、凭证库、符号链接 = hard error）。</li>
+  </ul>
+  <span class="cite">vite/src/markdown-import-plugin.ts · guide/skills.md（Import and mount）· guide/project-layout.md</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>激活机制：为什么是工具调用而非改 prompt</h2>
+  <p>挂载的技能出现在系统提示的 <b>Available Skills</b> 段（每行 name+description）；运行时另给一个 <code>activate_skill</code> 工具。模型判定任务匹配 → 调工具传技能名 → <b>完整 instructions 作为工具结果返回</b>。</p>
+  <p>因为 instructions 走工具结果而不是进系统提示：<b>技能激活不改变 prompt 前缀，provider 的缓存前缀存活</b>。激活未知名不是错误——结果会列出可用技能。你的指令也能引导激活：「Activate the <code>refunds</code> skill before handling any refund request.」<br>
+  <span class="cite">guide/skills.md（How activation works）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>defineSkill：内容短/生成时的内联姿势</h2>
+  <p>内容短、由数据拼成、或不想建目录时，用 <code>defineSkill({ name, description, instructions, files? })</code> 在代码里声明——等价于一个技能目录，首次需要时 runtime 打包成与 SKILL.md import 相同形状（自己写规范 frontmatter）。裸 <code>.md</code> import 只当纯字符串（不打包），想当 skill 就塞给 <code>defineSkill</code> 的 instructions。<br>
+  <span class="cite">guide/skills.md（Inline skills with defineSkill）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>支持文件在运行时</h2>
+  <p>打包技能的支持文件<b>旅行在应用 bundle 里，不进 agent 工作区</b>：运行时在虚拟只读路径提供每个文件（<code>read_skill_resource</code> 工具 + 文件工具的透明解析），激活简报会列出每份资源的确切路径。同一份 bundle 在笔记本 / Node / Cloudflare 上给同一批文件——无每环境文件系统配置，agent 也永远改不到自己的技能内容。<br>
+  <span class="cite">guide/skills.md（Supporting files at runtime）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>workspace skills：另一条发现路径</h2>
+  <p>带沙箱的 agent 在<b>会话启动</b>时扫沙箱工作目录的 <code>.agents/skills/</code>，每个合法 <code>&lt;name&gt;/SKILL.md</code> 自动进目录——无 import、无 useSkill。与 declared skill 的差别：内容激活时从磁盘实时读（会话中改立即可见）、支持文件就是普通工作区文件、坏格式只警告跳过（import 的在构建期严格校验、报错可行动）。工作区技能撞 declared skill 名 = 错误。</p>
+  <p>选择：<b>workspace skills</b> 用于专长跟着工作区走（仓库 checkout、CI、预设运行时工作区，让任何 agent 进来就懂它的约定）；<b>declared skills</b> 用于专长属于你的应用。<br>
+  <span class="cite">guide/skills.md（Workspace skills）</span></p>
+
+  <!-- ============ 8 ============ -->
+  <h2><span class="secno">§8</span>为什么你的 pi skills 能直接搬</h2>
+  <p>flue skill 就是 agentskills.io 格式（目录 + SKILL.md，frontmatter 的 <code>name</code> 必须等于目录名）。同一份规范被 pi / flue 等 harness 共用——所以你 ~/.pi/agent/skills 里的技能目录（金融、营销、novel 系列……）只要目录名 = frontmatter name，拷进 <code>src/skills/</code>（或 <code>agents/skills/</code>）静态 import 挂 <code>useSkill</code> 就能复用。Headroom 就这么放：<code>agents/skills/{energy-management,communication,safety}/SKILL.md</code>，中文指令、规范格式。你在 pi 侧沉淀的专长，等于 flue 侧的可移植资产。<br>
+  <span class="cite">guide/skills.md（Follow the open Agent Skills format）· Headroom 项目（agents/skills/*）· flue skill（实测：pi skill 目录可直接复用）</span></p>
+
+  <!-- ============ 9 ============ -->
+  <h2><span class="secno">§9</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "渐进披露里模型永远看得到的是？",
+          "options": ["完整 instructions 内容", "技能的所有支持文件", "一行 name 加 description", "技能目录全部文件树"],
+          "answer": 2,
+          "explain": "每技能一行 name+description 常驻；instructions 激活才加载。"
+        },
+        {
+          "q": "为什么 SKILL.md 必须静态导入？",
+          "options": ["运行时需要动态选择", "打包期必须知道目录内容", "静态导入性能更高", "规范明文禁止动态导入"],
+          "answer": 1,
+          "explain": "markdown-import 插件在构建期打包目录；动态 import 无法静态分析 = 构建错误。"
+        },
+        {
+          "q": "技能激活后 instructions 以什么形式到达？",
+          "options": ["追加进系统提示文本", "作为工具调用的结果", "写入持久状态字段", "由前端注入消息流"],
+          "answer": 1,
+          "explain": "activate_skill 是工具调用，briefing 是工具结果——prompt 前缀不变、cache 存活。"
+        },
+        {
+          "q": "workspace skills 从哪里被发现？",
+          "options": ["应用目录下的文件夹", "沙箱工作目录的隐藏目录", "npm 全局安装的目录", "项目的 node_modules 里"],
+          "answer": 1,
+          "explain": "会话启动扫沙箱 cwd 的 .agents/skills/，无需 import。"
+        },
+        {
+          "q": "打包技能时哪类文件会被硬拒？",
+          "options": ["超过一 MB 的大文件", "源码目录里 ts 文件", ".env 私钥符号链接等", "含中文说明的 md 文件"],
+          "answer": 2,
+          "explain": "拒包 secrets：.env、私钥、凭证库、符号链接是 hard error；大文件只警告。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：skill 的一生——目录/SKILL.md（agentskills 格式）→ 构建期静态打包（import 即声明）→ 常驻一行目录 + <code>activate_skill</code> 按需取 instructions → 支持文件 bundle 内虚拟只读。你 pi 侧的技能目录因此可零改造搬进 flue。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 7 课「sandbox：agent 的工位」</strong><br>
+  virtual 内存沙箱 / local() 真机 / 远程 provider 三种环境怎么选；useSandbox 的条件挂载与「presence 翻转只在 turn 边界」的语义；工具从哪来、凭证为什么不进 shell。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如你的某个 pi skill 想搬进 flue 报了什么错、或"激活了技能但模型没用它"——先回来对 §4 的机制，多半是 description 没写清何时用。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 6 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>vite/src/markdown-import-plugin.ts</code> · <code>runtime/src/skill-package.ts</code> · <a href="https://agentskills.io" target="_blank">agentskills.io</a></p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 9 课 · durability：接受的工作绝不丢</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 9 课 · flue 架构深潜 · 阶段② 持久与执行</p>
+  <h1>durability：接受的提交，必然走到一个终态</h1>
+  <p class="subtitle">读完这一课，你能讲清 stylist 那行 <code>durability = { maxAttempts: 3, timeoutMs: 300_000 }</code> 到底在买什么——以及「at-least-once 执行、exactly-once 记录」这句总纲怎么落到每一层。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 8 课。",
+      "questions": [
+        {
+          "q": "会话的单一真相源是什么？",
+          "options": ["业务应用数据库", "append-only 记录流", "前端本地缓存状态", "内存可变状态表"],
+          "answer": 1,
+          "explain": "canonical conversation 记录流；一切重建靠读回它。"
+        },
+        {
+          "q": "持久状态跨重启靠什么？",
+          "options": ["record log 的写入", "进程退出序列化", "沙箱文件落盘", "浏览器存储同步"],
+          "answer": 0,
+          "explain": "state_write 记录在 canonical 流里，渲染时 reduce。"
+        },
+        {
+          "q": "flue 数据库不存什么？",
+          "options": ["受理的提交记录", "持久状态的写入", "沙箱里的文件", "会话消息的内容"],
+          "answer": 2,
+          "explain": "沙箱文件、外部副作用、凭证、业务数据都不在库里。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>受理契约：submission 的承诺</h2>
+  <p>每条到达 agent 的输入（HTTP prompt、<code>dispatch</code>、<code>init().dispatch</code>、channel、schedule）都作为 <b>submission</b> 受理：payload 在<b>任何模型工作开始前</b>就落盘。202 响应 / dispatch 回执就是这份受理记录。它带着一个承诺：</p>
+  <blockquote><b>每个被受理的提交，无论中间崩多少次，都恰好到达一个持久终态——<code>completed</code> / <code>failed</code> / <code>aborted</code>。</b></blockquote>
+  <p>终态作为 <code>submission_settled</code> 记录写进会话流——等它的人（SDK 的 <code>wait()</code>、<code>init().read</code>）从那条记录 resolve/reject，跨自身重连也能看到。</p>
+  <ul>
+    <li><b>每会话一个持久队列</b>：按受理顺序处理，同一时刻一个 submission 在跑；忙时到达的消息在 turn 边界加入当前响应或排队等；<b>排队消息永不丢</b>。</li>
+    <li><b>attempt 机制</b>：coordinator 认领 → 跑 → settle。一次中断消耗一个 attempt，恢复认领新的，直到花光重试预算。</li>
+    <li><b>abort 同纪律</b>：<code>POST /:id/abort</code> 对每个未 settle 的提交记录持久中断意图，各自经正常 attempt 机制 settle 成 <code>aborted</code>——即使跑的进程已死。已完成的活不受影响。</li>
+  </ul>
+  <span class="cite">guide/durability.md（Submissions and the accepted-work contract）</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>恢复两阶段：先收敛，再分类</h2>
+  <p>崩溃不留自身记录（死进程停笔）。恢复由接替 owner 醒来时触发，只看持久证据。两阶段：</p>
+  <ol>
+    <li><b>收敛流（converge）</b>：把死 attempt 留下的半截流式输出无条件、幂等地闭合为 aborted 条目——任何崩溃形状都不会让会话看起来"流到一半"。半截输出保留在历史里。</li>
+    <li><b>分类（classify）</b>：证据能证明什么就从哪继续——见下表。</li>
+  </ol>
+  <table>
+    <tr><th>输入后的持久证据</th><th>恢复动作</th></tr>
+    <tr><td>输入从未落盘</td><td>重新排队，做一次干净首 attempt</td></tr>
+    <tr><td>已有一条完整助手响应</td><td>settle completed——<b>完成的工作永不丢弃，即使超了重试预算</b></td></tr>
+    <tr><td>半截输出（有文本/推理）</td><td>告知模型流被打断，从持久半截继续</td></tr>
+    <tr><td>工具轮有未决调用</td><td>修复工具批（见 §5），继续 turn 循环</td></tr>
+    <tr><td>瞬时 provider 错误（限流/宕机）</td><td>退避后重试该 turn，限错误预算内</td></tr>
+    <tr><td>上下文溢出响应</td><td>compaction 后重试该 turn</td></tr>
+    <tr><td>持久 abort 意图</td><td>settle aborted</td></tr>
+  </table>
+  <span class="cite">guide/durability.md（Recovery after an interruption）</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>总纲：at-least-once 执行，exactly-once 记录</h2>
+  <p>整套纪律一句话：<b>提交过的活（记录的响应、记录的工具结果、提交的状态写入）绝不重跑；提交前被打断的活下个 attempt 重跑</b>。含义：</p>
+  <ul>
+    <li>事件 hook 回调的<b>持久效果原子提交、绝不重复</b>，但回调里的一次外部副作用（发邮件/下单）<b>罕见地可能发生两次</b>——绝不能重复的事用持久状态或应用级幂等守卫。</li>
+    <li>恢复后的会话总停在「下条消息能正常处理」的状态——中断的提交<b>卡不住它后面的队列</b>。</li>
+    <li>中断留在时间线可见：aborted 半截、中断工具标记、settle 失败时的终态 advisory 信号。</li>
+  </ul>
+  <span class="cite">guide/durability.md（Recovery after an interruption）</span></p>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>重试预算与超时：stylist 那行配置</h2>
+  <p>默认 <b>10 attempts、每提交 1 小时</b>。按 agent 用 <code>durability</code> 静态覆盖：</p>
+  <pre><code>Stylist.durability = { maxAttempts: 3, timeoutMs: 300_000 };   // stylist 实测</code></pre>
+  <ul>
+    <li><b>超时是预防性的</b>：coordinator 在唤醒节奏上监督运行中的 attempt，到点就触发 attempt 的 abort 信号——挂在 signal-aware await（provider 调用、sandbox 命令、任何工具）上的工作被解绕走正常路径 settle；忽略 signal 的 run 被抛弃而非等待。挂死最多拖「deadline + 宽限」，卡不死提交。</li>
+    <li><b>静态在 agent 函数不跑时生效</b>：所以 agent 自己 render 里崩溃，durability 配置仍在——不会被那次崩溃抹掉。</li>
+    <li><b>timeout 是从首个 attempt 开始的墙上总预算</b>；turn 边界 join 和响应续接不延长它。</li>
+    <li>stylist 选 3 次/5 分钟的语义：购物建议 agent，宁可快速 settle failed 让用户重试，也不要挂 1 小时占着会话。</li>
+  </ul>
+  <span class="cite">guide/durability.md（Retry budget and timeout）· stylist-agent（Stylist.durability）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>工具批修复：普通、durable、委派三态</h2>
+  <p>工具批修复刻意保守——崩溃前已记录的结果原样保留（那些调用绝不重跑）：</p>
+  <ul>
+    <li><b>未决的普通调用不重跑</b>（runtime 不知副作用做过没），settle 成显式 unknown-outcome 错误，模型看到并能反应。</li>
+    <li><b>durable:true 工具</b>重跑，已完成 step.do 从记录回放（0005 讲过）。step 记录键到 toolCallId，跨同一调用的 attempt 携带；重新调用工具则每步全新。</li>
+    <li><b>在途委派任务</b>不落标记——重挂到子会话自己的持久转录，把子代理续跑完再提交真实结果；递归（孙子先续）；一批里多个任务全续完才提交批。delegate 无自己的 durability 配置——在父 attempt 下、吃父的重试预算。</li>
+  </ul>
+  <p>合同边界：step 是 <b>exactly-once 记录、at-least-once 执行</b>（记录落盘的窄窗口崩溃会重跑那一步——围绕外部效果的 step 各自幂等）；<b>redeploy 可撤回合同</b>（恢复时若当前 render 不再声明该工具/不再 durable，则退回普通中断标记路径）。<br>
+  <span class="cite">guide/durability.md（Durable tools / Delegated tasks）</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>持久状态的原子性（再强调）</h2>
+  <p>usePersistentState 写入与「做出它的那单位工作」原子提交：工具里的写入随该 turn 工具批提交、hook 里的写入随 hook 缝的检查点提交。恢复若把批判为中断，写入就没发生——重试从最后提交的状态渲染，恰好匹配模型看到的已做工作。这正是它做 at-least-once 回调守卫的根：<code>sent</code> 标志与发邮件的活同批提交，不可能"活回滚了标志还 true"。<br>
+  <span class="cite">guide/durability.md（Persisted state）</span></p>
+
+  <!-- ============ 7 ============ -->
+  <h2><span class="secno">§7</span>什么刻意不持久</h2>
+  <ul>
+    <li><b>工作区状态与对话分开</b>：会话库不存沙箱文件；虚拟沙箱易逝、恢复的 attempt 同样重建环境——被打断写入的临时文件没了。要持久工作区用按实例 id 键控的远程适配器。知识进持久状态、要留的文件进持久工作区，两者独立。</li>
+    <li><b>在途本地 promise 不持久</b>：awaiting 进程退出，accepted work 仍按 store 恢复，只是本地 promise 没了。想找回就把 <code>dispatch</code> 返回的 <code>DispatchReceipt</code> 持久化（如作为工作流 step 的 durable 结果），<code>read(receipt)</code> 从任何进程重挂。</li>
+    <li><b>agent 之外的代码不被检查点</b>：不做「函数从最后一行续跑」。检查点边界就是 agent 本身——内部 durable 工具给可续的 step.do；外部（endpoint/脚本/cron）用平台工作流引擎，重投递 = 会话里的新 submission，持久记录显示上次完成了什么。</li>
+    <li><b>外部副作用</b>：flue 记录「工具跑了、返回什么」，从不记录效果本身。at-least-once 意味着边界效果可能重复——设计成幂等、键到稳定 id（toolCallId / step 名）、一次性动作用持久状态守卫。</li>
+  </ul>
+  <span class="cite">guide/durability.md（What is deliberately not durable）</span></p>
+
+  <!-- ============ 8 ============ -->
+  <h2><span class="secno">§8</span>Node vs Cloudflare 的恢复归属</h2>
+  <p>持久记录与恢复决策两目标<b>完全相同</b>，差在「谁拥有会话工作、接替者怎么醒来」：</p>
+  <ul>
+    <li><b>Node</b>：server 进程内 coordinator；<b>lease 制</b>——每个运行中 submission 带短 lease，owner 干活时心跳。两个触发：启动对账（接替进程 boot 时扫中断工作后台 settle，顺序保持：恢复的活排在新投递前）+ 周期 lease 扫描（快重启没等 lease 过期就被回收，秒级认领）。优雅关停：turn 边界 abort 活跃提交并等 settle。</li>
+    <li><b>Cloudflare</b>：每个会话是 Durable Object + 自带 SQLite，归属结构性保证单活实例、无 lease 协议。恢复靠 <b>唤醒驱动</b>：DO 每次启动先对账上次实例在跑的 attempt；未 settle 工作存在时会自续短期 wake 调度，无人敲门也能及时恢复。</li>
+  </ul>
+  <span class="cite">guide/durability.md（Recovery by target）</span></p>
+
+  <!-- ============ 9 ============ -->
+  <h2><span class="secno">§9</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "每个被受理的提交必然到达什么？",
+          "options": ["恰好一个持久终态", "重试直到成功为止", "原地等待人工处理", "无限排队不落盘"],
+          "answer": 0,
+          "explain": "completed/failed/aborted 恰好一个，作为 settled 记录写进流。"
+        },
+        {
+          "q": "恢复的第一步做什么？",
+          "options": ["直接重跑全部工具", "收敛半截输出为中断", "清空持久状态重来", "通知客户端刷新页面"],
+          "answer": 1,
+          "explain": "先收敛流：把死 attempt 的半截输出幂等闭合为 aborted，再按证据分类。"
+        },
+        {
+          "q": "stylist 里 durability 配置改了什么？",
+          "options": ["默认 10 次一小时", "降为 3 次五分钟", "加持久状态守卫", "换成 durable 工具"],
+          "answer": 1,
+          "explain": "maxAttempts:3、timeoutMs:300000——覆盖默认 10 次/1 小时。"
+        },
+        {
+          "q": "中断的普通工具调用会怎样？",
+          "options": ["重跑一次以防副作用", "settle 成 unknown 错误", "静默跳过不再处理", "自动转为 durable 步骤"],
+          "answer": 1,
+          "explain": "不重跑（不知副作用做过没），以显式 unknown-outcome 错误给模型反应。"
+        },
+        {
+          "q": "持久状态为何能做至少一次守卫？",
+          "options": ["与所在工作单位原子提交", "每次写入先锁库再落盘", "值必须保持完全不变", "只在内存里更新不落盘"],
+          "answer": 0,
+          "explain": "写入随该 turn 工具批/hook 检查点原子提交——批判中断则写入没发生。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：能一句话讲清 durability——「受理即落盘 → attempt 认领执行 → 崩溃后收敛+分类续跑 → 预算/超时到点 settle failed」，总纲是 at-least-once 执行、exactly-once 记录，不持久的是工作区文件、本地 promise、外部副作用。你写 agent 时该问的是：哪个活必须 <code>durable:true</code>？哪个一次性的动作要用持久状态守卫？</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 10 课「subagents 与委派」</strong><br>
+  task 工具、detached 子会话、继承环境/隔离对话、委派深度 4、GeneralSubagent 与 defineSubagent——以及「什么时候用子代理 vs 工具 vs 技能」的决策。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+  比如你哪次踩过"重试后重复执行"、或想给 stylist 的某个工具加 durable:true 却不确定副作用幂等——拿真实场景来对 §5/§7。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 9 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键文件：<code>guide/durability.md</code> · <code>runtime/src/agent-execution-store.ts</code> · stylist-agent（durability 静态）</p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

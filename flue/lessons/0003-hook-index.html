@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 3 课 · hook 索引</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+  <p class="kicker">第 3 课 · flue 架构深潜 · 阶段① 核心心智</p>
+  <h1>hook 索引：谁注册了什么、何时生效</h1>
+  <p class="subtitle">读完这一课，你手里有一张「20 个 hook 分类卡」——每个 hook 是什么、在哪一帧可用、跑在哪个时点。这张卡也是往后查源码的路标。</p>
+
+  <!-- ============ 0 ============ -->
+  <h2><span class="secno">§0</span>开场检索</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "回忆第 2 课。",
+      "questions": [
+        {
+          "q": "agent 函数体里做异步工作会怎样？",
+          "options": ["返回 Promise 直接报错", "会被自动转成同步", "框架悄悄排队执行", "只有开发环境报错"],
+          "answer": 0,
+          "explain": "agent 必须同步；返回 Promise 即报错。异步放工具/动作/资源工厂。"
+        },
+        {
+          "q": "渲染产物里给『本轮模型调用』用的是什么？",
+          "options": ["结构指纹的摘要", "调用配置 runtime config", "渲染帧的全部内容", "原始函数源码"],
+          "answer": 1,
+          "explain": "配置（模型/指令/工具/沙箱/技能…）+ 一份结构指纹（跨 turn 对比用）。"
+        },
+        {
+          "q": "identity 绑定在何时执行？",
+          "options": ["模块求值期执行", "对话首次提交时", "路由注册调用时", "构建产物压缩后"],
+          "answer": 0,
+          "explain": "vite transform 追加的绑定在模块求值期跑，identity 作为字符串字面量进产物。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <!-- ============ 1 ============ -->
+  <h2><span class="secno">§1</span>三维坐标：渲染时点 × 可用帧 × 作用域</h2>
+  <p>给每个 hook 定位需要三个维度（源码注释里的关键语义都在这三轴上）：</p>
+  <ul>
+    <li><b>声明时点</b>：hook 是<b>渲染期声明</b>（在 agent 函数体里调用即完成注册），真正"跑"在别处——模型调用循环 / 生命周期缝 / 工具执行。</li>
+    <li><b>可用帧</b>：根 agent 帧 <code>kind:'agent'</code> vs 委派帧 <code>kind:'subagent'</code>。subagent 帧禁 <code>useModel</code>（模型在 <code>useSubagent</code> 定义上声明）、<code>usePersistentState</code>（持久状态是实例级的）、<code>useSandbox</code>（delegate 共享父环境）。</li>
+    <li><b>作用域</b>：<b>submission 级</b>（model/thinking/compaction，提交开始时读一次）vs <b>instance 级</b>（持久状态、会话存储）vs <b>render 级</b>（指令、能力集）。</li>
+  </ul>
+  <span class="cite">runtime/src/hooks/frame.ts（RenderFrame.kind）· runtime/src/hooks/render.ts（resolveSubagentDefinition）· guide/agent-hooks.md</span></p>
+
+  <!-- ============ 2 ============ -->
+  <h2><span class="secno">§2</span>组合类：给 agent 配能力</h2>
+  <table>
+    <tr><th>hook</th><th>注册什么</th><th>要点（源码契约）</th></tr>
+    <tr><td>useModel(model, opts?)</td><td>agent 的模型 + thinkingLevel/compaction</td><td>每次 render 恰好一次；submission 级；subagent 帧禁用</td></tr>
+    <tr><td>useInstruction(text)</td><td>追加指令文本</td><td>落在 return 指令之后、按调用顺序；低层逃生舱，无身份无追踪</td></tr>
+    <tr><td>useTool(def)</td><td>一个可调用动作</td><td>名字全局唯一；可条件挂载；每轮从零声明</td></tr>
+    <tr><td>useSkill(ref)</td><td>技能进目录（渐进披露）</td><td>静态导入或 defineSkill；同名一次 render 只能挂一次</td></tr>
+    <tr><td>useSandbox(factory, opts?)</td><td>文件/命令环境</td><td>每次 render 至多一次；工厂懒构造；subagent 帧禁用</td></tr>
+    <tr><td>useSubagent(def)</td><td>可委派的专业 agent</td><td>模型在定义上声明；delegate 在委派时独立渲染</td></tr>
+    <tr><td>useMcpConnection(def)</td><td>MCP 服务器工具</td><td>工具以 mcp__server__tool 挂进同一工具集</td></tr>
+  </table>
+  <span class="cite">runtime/src/hooks/use-model.ts / use-instruction.ts / use-tool.ts / use-skill.ts / use-sandbox.ts / use-subagent.ts</span></p>
+
+  <!-- ============ 3 ============ -->
+  <h2><span class="secno">§3</span>状态与数据类：记忆与输出</h2>
+  <table>
+    <tr><th>hook</th><th>语义</th><th>硬规则</th></tr>
+    <tr><td>usePersistentState(name, default)</td><td>读「截至本渲染」的持久值，返回 setter</td><td>读是渲染快照；写是静默的——不 wake agent、不中途重渲染；值须 JSON；用 updater 函数写避免基于过期快照</td></tr>
+    <tr><td>useInitialData&lt;T&gt;()</td><td>读实例创建时的结构化数据</td><td>创建期 schema 静态校验一次；已有实例忽略新数据</td></tr>
+    <tr><td>useDataWriter(name, schema?)</td><td>声明一个客户端数据通道，返回只写函数</td><td>单向出、模型看不见；名字是响应的客户端身份，必须无条件声明</td></tr>
+    <tr><td>useDelivery()</td><td>读「当前在模型面前」的那条消息</td><td>是个游标：随新消息到达而前进；让工具不必依赖模型回显参数</td></tr>
+    <tr><td>useDispatchMessage()</td><td>绑定到本实例的派发器</td><td>只收 message，无创建 data/uid（实例已存在）</td></tr>
+  </table>
+  <span class="cite">runtime/src/hooks/use-persistent-state.ts / use-initial-data.ts / use-data-writer.ts / use-delivery.ts / use-dispatch-message.ts · guide/agent-hooks.md</span></p>
+
+  <div class="sidenote">一条值得刻进脑子的分界：<b>持久状态</b>是「你的代码能读能改」的部分，其余一切活在转录文本里。跨轮状态、一次性工作守卫（gathering→drafting）、解锁能力——都是它。</div>
+
+  <!-- ============ 4 ============ -->
+  <h2><span class="secno">§4</span>生命周期类：响应与收件两条缝</h2>
+  <p>一次响应的真实时序（源码注释口径）：</p>
+  <div class="flow">
+    <div class="node">useResponseStart<small>响应真起点 · 首次模型调用前 · 早于 agentStart</small></div>
+    <div class="arrow">↓ <small>收到一条投递消息（输入已持久）</small></div>
+    <div class="node">useAgentStart<small>收件缝 · 模型首 turn 前 · async，适合加载数据</small></div>
+    <div class="arrow">↓ <small>[render → 模型调用 → 工具] 循环，可多轮</small></div>
+    <div class="node">useAgentFinish<small>执法缝 · 模型无更多工具调用、即将收尾</small><small>检查 ctx.response.toolCalls，工作没完就 ctx.append 让它回去</small></div>
+    <div class="arrow">↓ <small>若被 append，回到循环</small></div>
+    <div class="node">useResponseFinish<small>真终点 · 所有 agentFinish 循环落定、输出 flush 后</small></div>
+  </div>
+  <ul>
+    <li><b>response 类</b>：每个响应<b>恰好一次</b>的真起点/真终点（不论收了多少条消息）。返回对象深合并到响应的 <code>metadata</code>——给客户端打时间戳、token 用的信封字段。</li>
+    <li><b>agent 类</b>：每条投递消息都跑（agentStart 收件、agentFinish 执法）。<b>至少执行一次</b>：完成的工作持久提交不重复，打断的会重试——"绝不能做两次"的事（发邮件、下单）要用持久状态守卫。</li>
+  </ul>
+  <span class="cite">runtime/src/hooks/use-response-start.ts / use-response-finish.ts / use-agent-start.ts / use-agent-finish.ts · guide/agent-hooks.md（Event hooks）</span></p>
+
+  <!-- ============ 5 ============ -->
+  <h2><span class="secno">§5</span>第 4 族：自定义 hook</h2>
+  <p>以 <code>use</code> 开头的普通函数，内部调任意 built-in hook——因为帧按调用顺序扁平收集，自定义 hook 等价于「展开写」。大 agent 靠它保持可读，能力靠它在 agent 间复用：一个打包好工具+技能+指令的 <code>useGitHub()</code> 写一次，到处挂。<br>
+  <span class="cite">guide/agent-hooks.md（Custom hooks）· runtime/src/hooks/frame.ts</span></p>
+
+  <!-- ============ 6 ============ -->
+  <h2><span class="secno">§6</span>本课自测</h2>
+  <div class="widget" data-quiz>
+    <script type="application/json">
+    {
+      "intro": "共 5 题。",
+      "questions": [
+        {
+          "q": "在 subagent 帧里哪个 hook 被禁用？",
+          "options": ["usePersistentState 被禁", "useTool 与 useSkill 被禁", "useInstruction 被禁", "useDataWriter 被禁"],
+          "answer": 0,
+          "explain": "usePersistentState（实例级）、useSandbox（共享父环境）、useModel（模型在 useSubagent 定义上声明）在 delegate 帧不可用。"
+        },
+        {
+          "q": "一次响应里恰好跑一次的缝是？",
+          "options": ["agentStart 收件缝", "agentFinish 执法缝", "responseStart 与 Finish", "dataWriter 的每次写入"],
+          "answer": 2,
+          "explain": "useResponseStart/Finish 每个响应恰好一次（真起点/真终点）；agent 类 hook 每条投递都跑。"
+        },
+        {
+          "q": "『写完状态不 wake agent、不中途重渲染』指？",
+          "options": ["useDataWriter 的写入", "usePersistentState 的写入", "useDelivery 游标前进", "useTool run 的返回"],
+          "answer": 1,
+          "explain": "持久状态写入是静默的：不 wake、不中途重渲染，下个 turn 的 render 读到最新值。"
+        },
+        {
+          "q": "模型看不见、单向流向客户端的是？",
+          "options": ["持久状态的值", "useInstruction 文本", "useDataWriter 的 parts", "useDelivery 的消息"],
+          "answer": 2,
+          "explain": "data parts 单向出、模型从不见；可中间多次写驱动前端进度。"
+        },
+        {
+          "q": "想让『工作没做完就不许收尾』用什么？",
+          "options": ["responseFinish 里抛错", "agentFinish 里 ctx.append", "agentStart 里 dispatch", "useModel 改小 contextWindow"],
+          "answer": 1,
+          "explain": "useAgentFinish 是执法缝：检查 ctx.response.toolCalls，没做完就 ctx.append 信号把模型送回工作。"
+        }
+      ]
+    }
+    </script>
+  </div>
+
+  <p><b>本课的胜利</b>：给每个 hook 贴上一张标签——组合/状态/生命周期/自定义 × submission/instance/render 作用域 × agent/subagent 帧。遇到「这个 hook 为什么不生效」，先对着这张卡查它跑在哪个时点。</p>
+
+  <div class="next-lesson">
+    <strong>下一课预告 · 第 4 课「指令与模型」</strong><br>
+  深入 useModel 的两条铁律、model specifier 与 provider 解析、thinkingLevel 与 compaction，以及"中途换模型"为什么是下个 submission 才生效。
+  </div>
+
+  <div class="ask-teacher">
+    <strong>💡 随时问你的老师</strong><br>
+    比如你项目里用过哪些 hook、哪次"不生效"其实是对错了时点——把它丢给我，我们用这张索引卡对答案。
+  </div>
+
+  <footer>
+    <p>flue 架构深潜 · 第 3 课 · 主源码：<a href="https://github.com/withastro/flue" target="_blank">withastro/flue</a> · <a href="../reference/glossary.html">术语表</a> · 关键目录：<code>packages/runtime/src/hooks/</code>（20 个文件）</p>
+  </footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
