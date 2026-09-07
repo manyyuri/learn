@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>架构速查卡 · pi-coding-agent</title>
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body>
+<main>
+
+<p class="meta">REFERENCE · 速查卡 · 配套 <a href="../lessons/0001-prompt-journey.html">课程 0001–0010</a></p>
+
+<h1>pi-coding-agent 架构速查卡</h1>
+<p class="lead">整门课的压缩版。打印后贴墙，或回看时对着一张纸回忆。</p>
+
+<h2>五层地图（内→外）</h2>
+<table>
+<thead><tr><th>层</th><th>职责</th><th>源码位置</th><th>对应课</th></tr></thead>
+<tbody>
+<tr><td>① Agent 核心</td><td>纯 LLM 循环；state 驱动；单飞；发事件</td><td><code>packages/agent/src/</code></td><td><a href="../lessons/0002-agent-core-internals.html">2</a></td></tr>
+<tr><td>② Model</td><td>目录 / 认证 / 可用性</td><td><code>packages/ai</code> + <code>model-runtime.ts</code></td><td><a href="../lessons/0004-model-runtime.html">4</a></td></tr>
+<tr><td>③ Tools</td><td>定义 + schema + execute</td><td><code>core/tools/</code></td><td><a href="../lessons/0003-tools.html">3</a></td></tr>
+<tr><td>④ Session</td><td>prompt 前处理 / 事件转发 / retry / compaction / 持久化</td><td><code>core/agent-session.ts</code></td><td><a href="../lessons/0005-session-pipeline.html">5</a> <a href="../lessons/0006-compaction.html">6</a> <a href="../lessons/0007-session-tree.html">7</a></td></tr>
+<tr><td>⑤ 资源 + 模式 + 配置</td><td>发现扩展/技能/模板/上下文；三种驾驶舱</td><td><code>core/resource-loader.ts</code> + <code>modes/</code></td><td><a href="../lessons/0008-resource-loader.html">8</a> <a href="../lessons/0009-modes.html">9</a></td></tr>
+</tbody>
+</table>
+
+<h2>一次 prompt 的旅程</h2>
+<pre><code>session.prompt(text)
+ ├─ 前处理: /命令? → skill/模板展开 → 扩展input拦截
+ │          → 流式检查 → model/auth 校验 → 压缩检查
+ └─ agent.prompt(user消息)
+     └─ runLoop:  agent_start · turn_start · 消息入队/注入
+         ┌─ 内层 while: 调LLM流式 → message_update(text/toolcall)
+         │    message_end → 有 toolCall?
+         │       是 → 执行工具(parallel默认) → toolResult 回灌 → 再来一回合
+         │       否 → turn_end → steering队列空? → 内层退出
+         └─ 外层: followUp队列非空? → 再开一批回合
+             否 → agent_end
+ └─ session 后处理: retry? → compaction? → agent_settled</code></pre>
+
+<h2>事件 ↔ 谁在发出</h2>
+<table>
+<thead><tr><th>事件</th><th>拍点</th><th>层</th></tr></thead>
+<tbody>
+<tr><td><code>agent_start / agent_end</code></td><td>run 首尾</td><td>agent</td></tr>
+<tr><td><code>turn_start / turn_end</code></td><td>回合边界（一次 run 多个）</td><td>agent</td></tr>
+<tr><td><code>message_start / update / end</code></td><td>消息诞生/流式/定型入 transcript</td><td>agent</td></tr>
+<tr><td><code>tool_execution_start/update/end</code></td><td>工具执行前后</td><td>agent</td></tr>
+<tr><td><code>agent_settled</code></td><td>retry/compaction 决策后</td><td><b>session</b></td></tr>
+<tr><td><code>queue_update</code> · <code>auto_retry_*</code> · <code>compaction_*</code></td><td>队列 / 重试 / 压缩</td><td><b>session</b></td></tr>
+</tbody>
+</table>
+
+<h2>三条反直觉约束</h2>
+<ul>
+<li><strong>单飞</strong>：一个 Agent 同时只跑一个 run；流式时 <code>prompt()</code> 抛错 → 用 steer（插话）/ followUp（停后再跑）</li>
+<li><strong>上下文 = 消息序列</strong>：工具结果是被包成 <code>toolResult</code> 的消息回灌，不是旁路数据；<code>custom</code> 角色默认不进 LLM（convertToLlm 过滤）</li>
+<li><strong>Session 是监护人</strong>：命令/模板/拦截/auth/retry/compaction/settled 都在 session 层，Agent 核心只管跑循环</li>
+</ul>
+
+<h2>关键数字（默认）</h2>
+<pre><code>compaction:  contextTokens > 窗口 − 16k(reserveTokens) 触发
+             cut 后保留最近 ~20k(keepRecentTokens)，旧消息压成结构化总结
+工具执行:    parallel 默认；任一工具标 sequential 则整批串行
+             stopReason="length"(截断) → 整批工具判失败
+认证优先级:  setRuntimeApiKey > auth.json > 环境变量 > models.json fallback
+目录:        ModelRuntime.create() 默认只读本地缓存；联网需 allowModelNetwork</code></pre>
+
+<h2>workflow 决策速记</h2>
+<pre><code>固定多步 pipeline  → 每步独立 AgentSession（上下文干净、可并行、工具模型各配）
+跨步传上下文      → 结构化结论 + 产物路径引用（让下步 read 按需读）
+步骤完成信号      → agent_settled / await prompt()（含 retry），不是 agent_end
+并行步骤          → 独立 session；同一个 session 无法同时跑两个 run
+模型自动选型      → getAvailable（有认证的），不是 getModel（只在目录）</code></pre>
+
+<p class="footer" style="margin-top:2rem">
+<strong>术语</strong>：run=一次 prompt/continue 的完整过程；turn=一次 LLM 响应+其工具执行；single-flight=单飞；compaction=压缩；mode=驾驶舱。<br>
+<strong>术语表全文</strong>：<a href="../GLOSSARY.md">GLOSSARY.md</a>（注：Markdown，浏览器里可原文查看）。
+</p>
+
+</main>
+</body>
+</html>

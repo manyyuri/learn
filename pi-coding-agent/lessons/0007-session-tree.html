@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 7 课 · 持久化与 SessionManager</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0007 · pi-coding-agent 架构课 · <a href="../lessons/0006-compaction.html">← 第 6 课</a></p>
+
+<h1>持久化与 SessionManager：会话是一棵树</h1>
+<p class="lead">会话不只是一长串聊天记录——pi 把它存成 JSONL，并且用 <code>id/parentId</code> 组织成一棵可以原地分支的树。这一课弄清磁盘格式与树 API，你会明白「为什么能无文件地 fork / 回溯」。</p>
+
+<div class="callout"><strong>本课成果</strong>：能读懂一份 session JSONL、说清「叶子(leaf)」与「路径(path)」的含义，并会用 <code>SessionManager</code> 的树操作（branch / createBranchedSession / label）——这些是你 workflow 里做「检查点、回滚、多方案分支」的底层能力。</div>
+
+<h2>1. 磁盘格式（docs/session-format.md 核实）</h2>
+<pre><code>~/.pi/agent/sessions/--&lt;路径&gt;--/&lt;时间戳&gt;_&lt;uuid&gt;.jsonl</code></pre>
+<p>每行一个 JSON 对象，带 <code>type</code> 字段；首行是 header（含版本号）。条目类型：<code>message</code>（含 user/assistant/toolResult/custom 各类）、<code>thinking_level_change</code>、<code>model_change</code>、<code>compaction</code>、<code>branch_summary</code>、<code>custom</code>、<code>label</code>、<code>session_info</code>。版本：v1 线性 → v2 引入 <code>id/parentId</code> 树 → v3 把 <code>hookMessage</code> 改名 <code>custom</code>；加载时自动迁移到 v3。</p>
+<p>「你删了就没了」：删会话 = 删对应 .jsonl。没有中央数据库——会话就是这些文件。</p>
+
+<h2>2. 关键心智模型：leaf 与 path</h2>
+<ul>
+<li><strong>当前会话 = 从根走到某个「叶子」(leaf) 的一条路径</strong>。条目通过 <code>parentId</code> 串成树。</li>
+<li>对话继续 = 在叶子后 <code>append</code> 新条目。</li>
+<li><strong>分支 (branch) = 把叶子移到更早的条目</strong>，之后 append 的新条目就成为它的一条新孩子——同一文件里长出两条分支，互不新建文件。</li>
+<li>文件的「有效内容」永远是当前 leaf 那条路径，而不是整棵树。所以「<code>getPath()</code>（根到当前叶）才是上下文来源」。</li>
+</ul>
+<div class="callout"><strong>推论</strong>：为什么 append-only + leaf 指针？因为回溯/分叉不需要复制文件——只要把 leaf 指回去。代价是文件里会累积「被放弃的分支」，所以需要 <code>branch_summary</code>（压缩被弃路径的要点）与 <code>createBranchedSession</code>（抽出一条干净路径另存）。</div>
+
+<h2>3. SessionManager 树 API（对照着记）</h2>
+<table>
+<thead><tr><th>API</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>getEntries()</code> / <code>getTree()</code></td><td>全部条目（不含 header）/ 整棵树结构</td></tr>
+<tr><td><code>getPath()</code> / <code>getLeafEntry()</code> / <code>getChildren(id)</code></td><td>根到当前叶路径 / 当前叶子 / 某条目的孩子</td></tr>
+<tr><td><code>branch(entryId)</code></td><td>把 leaf 移到该条目 → 开新分支</td></tr>
+<tr><td><code>branchWithSummary(id, summary)</code></td><td>开分支并附上被弃路径的总结条目</td></tr>
+<tr><td><code>createBranchedSession(leafId)</code></td><td>把某条路径抽出为新文件</td></tr>
+<tr><td><code>appendLabelChange(id, label)</code></td><td>给条目打标签（checkpoint 标记）</td></tr>
+</tbody>
+</table>
+<p>构造方式（SDK 层）：<code>SessionManager.create(cwd)</code>（新会话落盘）、<code>inMemory()</code>（测试/无持久化）、<code>open(path)</code>（打开指定 jsonl）、<code>continueRecent(cwd)</code>、<code>list / listAll</code>。前面课程里你看到 <code>SessionManager.inMemory()</code> 一直出现在示例里——它就是「不落盘的会话」，很适合测试与一次性任务。</p>
+
+<h2>4. 消息的磁盘形态（你会解析它）</h2>
+<p>你要做 workflow、要持久化自己的中间产物或解析历史时，需要认得内容块：</p>
+<table>
+<thead><tr><th>内容块</th><th>字段</th></tr></thead>
+<tbody>
+<tr><td><code>text</code></td><td>type + text</td></tr>
+<tr><td><code>image</code></td><td>type + data(base64) + mimeType</td></tr>
+<tr><td><code>thinking</code></td><td>type + thinking</td></tr>
+<tr><td><code>toolCall</code></td><td>type + id + name + arguments</td></tr>
+</tbody>
+</table>
+<p>助手消息带 <code>api/provider/model/usage/stopReason</code>；toolResult 带 <code>toolCallId/toolName/isError/details</code>。注意 <code>stopReason: "pending"</code> 只存在于流式中间态，落盘前会被替换成终止原因——<strong>JSONL 里永远看不到 pending</strong>。</p>
+
+<h2>5. 检验</h2>
+
+<div class="quiz" data-explain="叶子移动靠 branch(entryId)，之后 append 形成新分支；不复制文件。">
+<p class="q">Q1. SessionManager.branch(id) 做了什么？</p>
+<div class="opts">
+<button data-correct="false">复制当前文件生成一份新会话</button>
+<button data-correct="true">把叶子移到更早的条目处</button>
+<button data-correct="false">删除该 id 之后的所有条目</button>
+<button data-correct="false">把该 id 标注为新的文件头</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="有效内容始终是根到当前叶那条路径（getPath），不是整棵树的全部条目。">
+<p class="q">Q2. 一个会话语义的「上下文」来自？</p>
+<div class="opts">
+<button data-correct="false">getTree 返回的全部树节点消息</button>
+<button data-correct="true">根到当前叶子那一条路径</button>
+<button data-correct="false">文件里最新追加的那一条记录</button>
+<button data-correct="false">按 parentId 深度遍历的所有消息</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="append-only + leaf 指针让回溯无需复制；被弃分支用 branch_summary 记录要点，createBranchedSession 抽出干净路径。">
+<p class="q">Q3. 分支会留下废弃分支，怎么处理？</p>
+<div class="opts">
+<button data-correct="false">加载时自动丢弃全部废弃条目</button>
+<button data-correct="true">branch_summary 记录要点留档</button>
+<button data-correct="false">废弃分支不可访问也不需要管</button>
+<button data-correct="false">每次分支都强制物理清理旧文件</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="pending 只用于流式中间态；终止消息会用真实 stopReason 替换后才落盘。">
+<p class="q">Q4. 关于 stopReason: "pending" 说法正确的是？</p>
+<div class="opts">
+<button data-correct="false">会随消息一起持久化到文件里</button>
+<button data-correct="true">只出现在流式中间态不落盘</button>
+<button data-correct="false">表示工具结果仍在排队待执行</button>
+<button data-correct="false">是终止消息的标准结束原因之一</button>
+</div>
+</div>
+
+<h2>6. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/docs/session-format.md</code> —— 全读：文件位置、版本演进、消息/内容块类型、Usage 结构。</li>
+<li><code>packages/coding-agent/src/core/session-manager.ts</code> —— 读 entry 类型、<code>branch / branchWithSummary / createBranchedSession</code>、静态工厂。</li>
+<li><code>examples/sdk/11-sessions.ts</code> —— 可运行示例。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“我想在 workflow 里给每个关键产物打个 label 当检查点，怎么配合 appendLabelChange 用？”“session 树能跨多个 jsonl 吗，还是只能文件内？”</p>
+<p class="sources">下一课：⑧ 资源加载 ResourceLoader —— extensions / skills / prompts / AGENTS.md 怎么被发现。源码：coding-agent/src/core/resource-loader.ts。</p>
+</div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 2 课 · Agent 核心内部：状态、事件与钩子</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0002 · pi-coding-agent 架构课 · <a href="../lessons/0001-prompt-journey.html">← 第 1 课</a></p>
+
+<h1>Agent 核心内部：状态、事件与钩子</h1>
+<p class="lead">第 1 课给了你旅程全景。这一课钻进最内层——<code>@earendil-works/pi-agent-core</code> 的 <code>Agent</code> 类——看清它到底拿什么做决定，以及你在哪几个点可以插手。</p>
+
+<div class="callout"><strong>本课成果</strong>：理解 Agent 的「状态即真相」，看透 single-flight 与两个队列的源码由来，并知道五个钩子（hook）各自在循环里的位置与用途——这些是你在自己应用里嵌入 pi 时的真正杠杆。</div>
+
+<h2>1. 状态即真相：state 里有什么</h2>
+<p>读 <code>packages/agent/src/types.ts</code> 的 <code>AgentState</code>（源码核实）：</p>
+<pre><code>state = {
+  systemPrompt: string,        // 每次模型请求都带
+  model: Model,                // 未来回合用的模型
+  thinkingLevel: ThinkingLevel,// off | minimal | low | medium | high | xhigh | max
+  tools: AgentTool[],          // 本 run 可用的工具
+  messages: AgentMessage[],    // transcript——上下文
+  isStreaming: boolean,        // 只读：是否在跑
+  streamingMessage?,           // 只读：当前流式中的部分助手消息
+  pendingToolCalls: Set,       // 只读：正在执行的工具调用 id
+  errorMessage?,               // 只读：最近一次失败回合的错误
+}</code></pre>
+<p>三个只读字段是循环运行时的「仪表盘」，五个可变字段是你编程时唯一需要关心的输入。<code>messages</code> 与 <code>tools</code> 的 setter 会复制数组——赋值不会被外部数组的后续修改影响。</p>
+<div class="callout"><strong>核心心智模型</strong>：Agent 不做别的——它只是「对着 state 里这堆输入，跑到没活干」。你想改变行为，几乎都是改 state 的五个可变字段（换 model、改 tools、注入 messages、改 systemPrompt）。</div>
+
+<h2>2. 单飞约束的源码形态</h2>
+<p><code>agent.ts</code> 里有一个 <code>activeRun</code> 槽位：</p>
+<pre><code>private activeRun?: ActiveRun;
+async prompt(...) {
+  if (this.activeRun) throw new Error("Agent is already processing. Use steer() or followUp()…");
+  … this.activeRun = { promise, abortController };
+}</code></pre>
+<p>后果（第 1 课提过，这里看源码）：正在流式时再 <code>prompt()</code> 直接抛错。于是有了两条替代路径：</p>
+<ul>
+<li><code>steer(message)</code> → 塞进 <code>steeringQueue</code>：当前回合的 <strong>工具调用结束</strong> 后注入，适合「插话纠偏」。</li>
+<li><code>followUp(message)</code> → 塞进 <code>followUpQueue</code>：<strong>agent 本该停止</strong> 时再续跑，适合「等你忙完再说」。</li>
+</ul>
+<p>队列行为由 <code>QueueMode</code> 决定：<code>one-at-a-time</code>（默认，每次排空只放一条最老的）或 <code>all</code>（一次全放）。</p>
+
+<h2>3. 五个钩子：你在循环里的插手点</h2>
+<p><code>Agent</code> 构造函数接收一组可选钩子，都在 <code>agent-loop.ts</code> 里被调用（已核实行号语义）：</p>
+<table>
+<thead><tr><th>钩子</th><th>何时被调</th><th>典型用途</th></tr></thead>
+<tbody>
+<tr><td><code>transformContext</code></td><td>每次 <code>streamAssistantResponse</code> 调 LLM 之前（AgentMessage[]→AgentMessage[]）</td><td>注入/改写发给模型的上下文；压缩就是在这里接入的</td></tr>
+<tr><td><code>prepareNextTurn</code></td><td>内层循环每回合之间（收到上一回合 <code>lastCompletedTurn</code>）</td><td>回合间隙换模型/换 thinking 等级/改上下文——模型切换器就挂这</td></tr>
+<tr><td><code>beforeToolCall</code></td><td>工具执行前（已解析并校验参数后）</td><td>返回 <code>{ block: true }</code> 可拦下工具，安全闸门</td></tr>
+<tr><td><code>afterToolCall</code></td><td>工具执行后、结果定稿前</td><td>逐字段覆盖 content/details/isError 等</td></tr>
+<tr><td><code>shouldStopAfterTurn</code></td><td>每个 turn 结束后</td><td>返回 true 提前结束整轮 run</td></tr>
+</tbody>
+</table>
+<p>另有 <code>convertToLlm</code>：在 LLM 边界把 <code>AgentMessage[]</code> 转成模型 <code>Message[]</code>。默认只保留 <code>user/assistant/toolResult</code> 三角色——<code>custom</code> 角色消息就此被过滤，不给模型看到。想要自定义角色进上下文？自己给一个 <code>convertToLlm</code>。</p>
+
+<h2>4. 事件推进状态：一个 switch 就讲完</h2>
+<p><code>agent.ts</code> 的 <code>processEvents()</code> 是所有事件归口的单点：先按事件类型更新内部状态，再把事件广播给订阅者。逐条对（源码核实）：</p>
+<table>
+<thead><tr><th>事件</th><th>状态副作用</th></tr></thead>
+<tbody>
+<tr><td><code>message_start</code> / <code>message_update</code></td><td><code>streamingMessage</code> = 该消息（流式中的部分助手消息）</td></tr>
+<tr><td><code>message_end</code></td><td><code>streamingMessage</code> 清空；消息 <strong>push 进 transcript</strong>（这是消息落库到 state 的唯一时刻）</td></tr>
+<tr><td><code>tool_execution_start</code></td><td>把 toolCallId 加入 <code>pendingToolCalls</code></td></tr>
+<tr><td><code>tool_execution_end</code></td><td>从 <code>pendingToolCalls</code> 移除该 id</td></tr>
+<tr><td><code>turn_end</code></td><td>若助手消息带 <code>errorMessage</code> → 写入 <code>errorMessage</code></td></tr>
+<tr><td><code>agent_end</code></td><td><code>streamingMessage</code> 清空</td></tr>
+</tbody>
+</table>
+<p>注意：<strong>消息只有在 <code>message_end</code> 才进入 transcript</strong>。订阅者若想在消息定型前拦截/展示流式内容，盯 <code>message_update</code>；想拿到已入 transcript 的完整消息，盯 <code>message_end</code>。</p>
+
+<h2>5. run 的收尾：比 agent_end 再多一层</h2>
+<p><code>processEvents</code> 里，广播 <code>agent_end</code> 之后并不代表进程结束——还要等所有监听该事件的 listener settle。而在 <code>AgentSession</code> 侧，run 结束后还有 session 的后处理（retry/compaction），最终才发 <code>agent_settled</code>。所以在最内层你要的是 <code>waitForIdle()</code>，在 SDK 层你要的是 <code>agent_settled</code>。</p>
+
+<h2>6. 检验</h2>
+
+<div class="quiz" data-explain="message_end 才会把消息 push 进 transcript；message_start/update 期间 streamingMessage 只是流式中间态。">
+<p class="q">Q1. 一条助手消息在哪个事件时才真正进入 transcript？</p>
+<div class="opts">
+<button data-correct="false">message_start 时已进入完整消息</button>
+<button data-correct="true">message_end 时 push 进消息列表</button>
+<button data-correct="false">message_update 的增量到达即进入</button>
+<button data-correct="false">turn_start 时由循环预先写入</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="transformContext 每次调 LLM 前都会跑（AgentMessage[] 变换），在循环文件里紧邻 convertToLlm。">
+<p class="q">Q2. 想在发给模型的上下文上动手脚，应挂哪个钩子？</p>
+<div class="opts">
+<button data-correct="false">afterToolCall 里改结果再回灌</button>
+<button data-correct="true">transformContext 在请求前变换消息</button>
+<button data-correct="false">shouldStopAfterTurn 拦下整个回合</button>
+<button data-correct="false">prepareNextTurn 只改模型不动消息</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="steer 注入发生在当前回合工具调用结束后（内层）；followUp 在 agent 本该停止后（外层）。">
+<p class="q">Q3. followUp 与 steer 的关键差异是什么？</p>
+<div class="opts">
+<button data-correct="false">steer 会终止运行而 followUp 不会</button>
+<button data-correct="true">followUp 在本该停止后才续跑</button>
+<button data-correct="false">steer 只支持单条而 followUp 支持多条</button>
+<button data-correct="false">followUp 直接抛错而 steer 静默入队</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="beforeToolCall 在参数解析校验后、执行前，返回 block 即可拦下（错误结果回给模型）。">
+<p class="q">Q4. 想做成「危险工具必须审批」的安全闸门，用哪个钩子？</p>
+<div class="opts">
+<button data-correct="false">transformContext 把闸门写进提示词</button>
+<button data-correct="true">beforeToolCall 返回 block 拦下调用</button>
+<button data-correct="false">afterToolCall 用后覆盖结果标记</button>
+<button data-correct="false">convertToLlm 过滤掉该工具的调用</button>
+</div>
+</div>
+
+<h2>7. 一手阅读</h2>
+<ul>
+<li><code>packages/agent/src/types.ts</code> —— 读 <code>AgentState</code>、<code>AgentEvent</code>、五个钩子的 Context/Result 接口、<code>AgentTool</code> 定义。本课所有字段都来自这里。</li>
+<li><code>packages/agent/src/agent.ts</code> —— 重点看 <code>prompt/continue</code>（单飞）、<code>processEvents</code>（状态推进 switch）、<code>createLoopConfig</code>（钩子接线）。</li>
+</ul>
+<p>对照着 <code>agent-loop.ts</code> 的 <code>runLoop</code> 读一遍，第 1 课与第 2 课就焊死了。</p>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“<code>steer</code> 的 ‘工具调用结束后注入’ 具体对应循环哪一行？”或“我想让 custom 角色进上下文，convertToLlm 怎么写？”</p>
+<p class="sources">下一课：③ 工具系统 —— 定义、schema、执行路径与内置工具。源码：coding-agent/src/core/tools/。</p>
+</div>
+
+</main>
+</body>
+</html>

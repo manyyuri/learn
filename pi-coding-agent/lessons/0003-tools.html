@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 3 课 · 工具系统</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0003 · pi-coding-agent 架构课 · <a href="../lessons/0002-agent-core-internals.html">← 第 2 课</a></p>
+
+<h1>工具系统：定义、校验与执行</h1>
+<p class="lead">你在 SDK 里用 <code>defineTool</code> 声明过自定义工具，也知道读文件会走到 <code>read</code> 工具。这一课看清工具的一生：从「定义」到「被模型点名」到「参数校验」到「执行并把结果回灌」。</p>
+
+<div class="callout"><strong>本课成果</strong>：弄清 AgentTool 的完整结构、参数校验发生的准确位置与方式、并行/串行执行的决策逻辑，以及「工具工厂」（createReadTool 等）为什么做成可注入 operations 的形式。</div>
+
+<h2>1. 两种表现形态：定义 vs 运行时</h2>
+<p>工具在系统里有两个名字，别搞混：</p>
+<table>
+<thead><tr><th>形态</th><th>是什么</th><th>出现位置</th></tr></thead>
+<tbody>
+<tr><td><code>ToolDefinition</code></td><td>“定义优先”形态，execute 会额外拿到扩展上下文 ctx</td><td>扩展注册、工具工厂的 <code>createXToolDefinition</code></td></tr>
+<tr><td><code>AgentTool</code></td><td>agent 循环实际消费的形态</td><td>被塞进 <code>state.tools</code>、进入 <code>Context.tools</code></td></tr>
+</tbody>
+</table>
+<p>两者用 <code>wrapToolDefinition()</code> 互转（<code>coding-agent/src/core/tools/tool-definition-wrapper.ts</code>）。内置工具的 <code>createReadTool(cwd)</code> 其实就是 <code>wrapToolDefinition(createReadToolDefinition(cwd))</code>——一条线下来。</p>
+
+<h2>2. AgentTool 的结构（源码核实）</h2>
+<pre><code>interface AgentTool extends Tool {
+  name: string;               // 模型点名用的标识：如 "read"
+  label: string;              // UI 展示名
+  description: string;        // 给模型的说明
+  parameters: TypeBoxSchema;  // JSON schema，用于校验
+  prepareArguments?: (args) => args;      // 校验前的兼容垫片
+  execute(toolCallId, params, signal?, onUpdate?): Promise&lt;AgentToolResult&gt;
+  executionMode?: "sequential" | "parallel";  // 逐工具覆盖默认策略
+  replay?: "never" | "safe";  // 效果可重放性（重试相关）
+}</code></pre>
+<p><code>execute</code> 返回 <code>AgentToolResult</code>，核心字段：<code>content</code>（给模型的文本/图片）、<code>details</code>（给 UI 的结构化数据）、<code>terminate</code>（提示本批后停止）。<code>onUpdate</code> 回调可在执行中流式吐 partial 结果，对应你订阅到的 <code>tool_execution_update</code>。</p>
+<div class="callout"><strong>规则</strong>：execute 失败用 throw 表达（循环会包成错误 toolResult 回给模型），不要吞错。返回的 <code>content</code> 最终成为 <code>toolResult</code> 消息正文——就是第 1 课第 7 步那份东西。</div>
+
+<h2>3. 参数校验发生在执行前</h2>
+<p>校验不在工具代码里，而在循环的「准备阶段」（agent-loop 的 <code>prepareToolCall</code>），真正实现是 <code>pi-ai/src/utils/validation.ts</code> 的 <code>validateToolArguments</code>：</p>
+<pre><code>args = structuredClone(toolCall.arguments);
+normalizeOptionalNulls(args, schema);   // 规范化 null/缺省
+Value.Convert(schema, args);            // typebox 类型转换/强转
+validator.Check(args) ?? 抛出格式化错误;</code></pre>
+<p>校验失败 → 异常 → 该 toolCall 拿到一条 <code>isError</code> 的 toolResult，模型下回合会看到错误原因并自行纠正。<code>TypeBox</code> schema 是参数合约的唯一事实来源（内置工具的 <code>readSchema</code> 就是 <code>Type.Object({ path: Type.String(...), offset: Type.Optional(...) })</code>）。</p>
+
+<h2>4. 执行：并行还是串行</h2>
+<p>一个助手消息可能带多个 <code>toolCall</code>。执行策略判定（<code>agent-loop.ts</code> 的 <code>executeToolCalls</code>）：</p>
+<ul>
+<li>默认 <code>parallel</code>：工具并发执行；<code>tool_execution_end</code> 按完成顺序发，toolResult 消息按原声明顺序补发。</li>
+<li>若 <code>config.toolExecution === "sequential"</code> 或本批里某个工具声明 <code>executionMode: "sequential"</code> → 整批改串行，逐个来。</li>
+<li>特殊安全阀：<code>stopReason === "length"</code>（输出被 token 上限截断）→ <strong>整批工具直接判失败</strong>，因为截断的 JSON 参数可能不完整，宁可让模型重发。</li>
+</ul>
+<p>另有两个钩子夹在中间（第 2 课讲过）：<code>beforeToolCall</code>（拦）与 <code>afterToolCall</code>（覆盖结果）。</p>
+
+<h2>5. 内置工具为什么是「工厂 + operations」</h2>
+<p>看 <code>read.ts</code>：真正的文件读取被抽象成 <code>ReadOperations</code> 接口（<code>readFile/access/detectImageMimeType</code>），默认实现是本地 fs，但你可以注入自定义 operations——官方注释写明这是为了「委托给远程系统（例如 SSH）」。同理 bash 有 <code>BashOperations</code>。</p>
+<p>这意味着：<strong>内置工具的可测性、可替换执行后端是设计出来的，不是偶然</strong>。你在自己的 workflow 里若想把「读文件/跑命令」落到沙箱或远端，不用重写工具，注入 operations 即可。</p>
+<p>工具清单（<code>tools/index.ts</code> 的 <code>allToolNames</code>）：<code>read, write, edit, bash, powershell, grep, find, ls</code>。SDK 里 <code>tools: [...]</code> 是一个 allowlist——只声明名字，session 会用它去工厂取对应工具。</p>
+
+<h2>6. 检验</h2>
+
+<div class="quiz" data-explain="校验在循环准备阶段调用 validateToolArguments，失败抛错，工具不执行，错误回给模型。">
+<p class="q">Q1. 工具参数校验失败时会发生什么？</p>
+<div class="opts">
+<button data-correct="false">工具仍执行并忽略多余参数</button>
+<button data-correct="true">抛错，错误结果回给模型纠正</button>
+<button data-correct="false">直接终止整个 agent 的运行</button>
+<button data-correct="false">仅记录日志并继续下一批</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="stopReason length 表示输出被 token 上限截断，参数可能不完整，所以整批判失败让模型重发。">
+<p class="q">Q2. 为什么「输出被截断」时整批工具调用会判失败？</p>
+<div class="opts">
+<button data-correct="true">截断的参数 JSON 可能不完整不安全</button>
+<button data-correct="false">模型在下回合必然重新输出全部内容</button>
+<button data-correct="false">截断说明工具 schema 本身写错了</button>
+<button data-correct="false">避免与并行执行的内存冲突</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="wrapToolDefinition 把 ToolDefinition 包成 AgentTool；内置 createReadTool 就是这样一行实现的。">
+<p class="q">Q3. AgentTool 与 ToolDefinition 的关系是什么？</p>
+<div class="opts">
+<button data-correct="false">两者毫无关系各自独立注册</button>
+<button data-correct="true">定义经包装器转换为运行时形态</button>
+<button data-correct="false">AgentTool 是定义的反向兼容别名</button>
+<button data-correct="false">只有扩展工具才需要这层转换</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="read 工具把 fs 操作抽象成 ReadOperations，可注入自定义实现来委托远程/沙箱执行。">
+<p class="q">Q4. 内置 read 工具支持「注入自定义文件后端」的机制是？</p>
+<div class="opts">
+<button data-correct="false">运行时替换 read 工具的 execute</button>
+<button data-correct="true">注入实现 ReadOperations 接口的对象</button>
+<button data-correct="false">写一个同名工具覆盖内建工具</button>
+<button data-correct="false">改 state.tools 重新绑定整个列表</button>
+</div>
+</div>
+
+<h2>7. 一手阅读</h2>
+<ul>
+<li><code>packages/agent/src/types.ts</code> —— 读 <code>AgentTool</code>、<code>AgentToolResult</code>、<code>ToolExecutionMode</code> 定义。</li>
+<li><code>packages/agent/src/agent-loop.ts</code> —— 读 <code>executeToolCalls / executeToolCallsParallel / executeToolCallsSequential</code> 与 <code>prepareToolCall</code>（找工具、校验）。</li>
+<li><code>packages/coding-agent/src/core/tools/read.ts</code> —— 读 schema、ReadOperations、工厂函数，体会「定义/执行分离 + 可注入后端」。</li>
+<li><code>packages/ai/src/utils/validation.ts</code> —— 读 <code>validateToolArguments</code> 全流程。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“我自定义工具里想流式返回进度，onUpdate 怎么用？”“为什么 parallel 时 tool_execution_end 顺序会乱？”</p>
+<p class="sources">下一课：④ 模型层 ModelRuntime —— 目录、认证、可用性快照。源码：coding-agent/src/core/model-runtime.ts。</p>
+</div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,260 @@
+/* learn.css — shared stylesheet for pi-coding-agent architecture course
+   Tufte-inspired: readable, print-friendly, calm. All lessons link this. */
+
+:root {
+	--ink: #1a1a1a;
+	--muted: #5b5b5b;
+	--accent: #7a1f1f; /* pi-ish warm red */
+	--accent-soft: #f5e9e7;
+	--rule: #d8d2cc;
+	--code-bg: #f6f4f1;
+	--panel: #faf8f6;
+	--good: #1f6b3a;
+	--warn: #8a5a00;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	font-size: 17px;
+}
+
+body {
+	margin: 0;
+	padding: 0 1.25rem;
+	background: #fff;
+	color: var(--ink);
+	font-family: "Georgia", "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+
+main {
+	max-width: 46rem;
+	margin: 0 auto;
+	padding: 3.5rem 0 6rem;
+}
+
+/* ---------- typography ---------- */
+
+h1 {
+	font-size: 1.9rem;
+	line-height: 1.25;
+	margin: 0 0 0.4rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+h2 {
+	font-size: 1.35rem;
+	margin: 2.6rem 0 0.7rem;
+	padding-bottom: 0.25rem;
+	border-bottom: 1px solid var(--rule);
+	font-weight: 700;
+}
+
+h3 {
+	font-size: 1.05rem;
+	margin: 1.9rem 0 0.5rem;
+	font-weight: 700;
+}
+
+p {
+	margin: 0.7rem 0;
+}
+
+ul,
+ol {
+	margin: 0.6rem 0 0.9rem;
+	padding-left: 1.5rem;
+}
+
+li {
+	margin: 0.3rem 0;
+}
+
+strong {
+	font-weight: 700;
+}
+
+code {
+	font-family: "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
+	font-size: 0.86em;
+	background: var(--code-bg);
+	padding: 0.1em 0.35em;
+	border-radius: 4px;
+}
+
+pre {
+	font-family: "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
+	font-size: 0.8rem;
+	line-height: 1.5;
+	background: var(--code-bg);
+	border: 1px solid var(--rule);
+	border-radius: 8px;
+	padding: 0.9rem 1rem;
+	overflow-x: auto;
+	margin: 0.9rem 0;
+}
+
+pre code {
+	background: none;
+	padding: 0;
+	font-size: inherit;
+}
+
+a {
+	color: var(--accent);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+}
+
+a:hover {
+	text-decoration-thickness: 2px;
+}
+
+/* ---------- components ---------- */
+
+.meta {
+	color: var(--muted);
+	font-size: 0.9rem;
+	margin-bottom: 1.6rem;
+	font-family: "SF Mono", "Menlo", monospace;
+}
+
+.lead {
+	font-size: 1.08rem;
+	color: #333;
+}
+
+.callout {
+	background: var(--panel);
+	border: 1px solid var(--rule);
+	border-left: 4px solid var(--accent);
+	border-radius: 0 8px 8px 0;
+	padding: 0.8rem 1rem;
+	margin: 1.1rem 0;
+	font-size: 0.95rem;
+}
+
+.callout.good {
+	border-left-color: var(--good);
+}
+
+.callout.warn {
+	border-left-color: var(--warn);
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%;
+	margin: 1rem 0;
+	font-size: 0.92rem;
+}
+
+th,
+td {
+	border: 1px solid var(--rule);
+	padding: 0.45rem 0.6rem;
+	text-align: left;
+	vertical-align: top;
+}
+
+th {
+	background: var(--panel);
+	font-weight: 700;
+}
+
+/* ---------- quiz widget ---------- */
+
+.quiz {
+	margin: 1.4rem 0;
+	padding: 1.1rem 1.2rem;
+	border: 1px solid var(--rule);
+	border-radius: 10px;
+	background: #fff;
+}
+
+.quiz .q {
+	font-weight: 700;
+	margin-bottom: 0.6rem;
+}
+
+.quiz .opts {
+	display: flex;
+	flex-direction: column;
+	gap: 0.45rem;
+}
+
+.quiz button {
+	font: inherit;
+	font-family: inherit;
+	font-size: 0.92rem;
+	text-align: left;
+	background: var(--panel);
+	border: 1px solid var(--rule);
+	border-radius: 8px;
+	padding: 0.5rem 0.8rem;
+	cursor: pointer;
+	color: var(--ink);
+	transition: border-color 0.15s, background 0.15s;
+}
+
+.quiz button:hover {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.quiz button.correct {
+	border-color: var(--good);
+	background: #e7f2ea;
+}
+
+.quiz button.wrong {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.quiz .explain {
+	margin-top: 0.6rem;
+	font-size: 0.9rem;
+	color: var(--muted);
+	min-height: 1.2em;
+}
+
+.quiz .explain.show {
+	color: var(--ink);
+}
+
+.footer {
+	margin-top: 3rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--rule);
+	color: var(--muted);
+	font-size: 0.9rem;
+}
+
+.footer .sources {
+	font-family: "SF Mono", "Menlo", monospace;
+	font-size: 0.8rem;
+}
+
+@media print {
+	body {
+		font-size: 11pt;
+	}
+	main {
+		max-width: 100%;
+		padding: 0;
+	}
+	.quiz button {
+		border: 1px solid #bbb;
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+	a {
+		color: var(--ink);
+	}
+}

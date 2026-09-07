@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 6 课 · 压缩 Compaction</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0006 · pi-coding-agent 架构课 · <a href="../lessons/0005-session-pipeline.html">← 第 5 课</a></p>
+
+<h1>压缩 Compaction：上下文窗口不够时的取舍</h1>
+<p class="lead">长会话最大的敌人是上下文窗口。pi 的做法不是「丢历史」，而是「压缩成 checkpoint 总结，保留最近的真实消息」。这一课看清它何时触发、怎么选切点、总结如何生成。</p>
+
+<div class="callout"><strong>本课成果</strong>：理解压缩的三要素——触发条件（阈值）、切点选择（在 turn 边界砍、留最近 N tokens）、总结格式（结构化 checkpoint）。这直接关系你 workflow 里「长任务跑着跑着上下文爆了」怎么办。</div>
+
+<h2>1. 三个默认设置（源码核实）</h2>
+<pre><code>DEFAULT_COMPACTION_SETTINGS = {
+  enabled: true,
+  reserveTokens: 16384,    // 窗口预留：还剩这么多就触发
+  keepRecentTokens: 20000, // 切点之后保留的最近 token 预算
+}</code></pre>
+<p>触发判断（<code>shouldCompact</code>）：<code>contextTokens &gt; contextWindow − reserveTokens</code>。也就是说模型窗口假设如 200k，当上下文估算超过 200k−16k ≈ 184k 时，下一次后处理就会触发压缩。</p>
+
+<h2>2. 上下文用量怎么估</h2>
+<p>压缩不重新数一遍每条消息，而是：</p>
+<ul>
+<li>优先用<strong>最后一条有效助手消息的 usage</strong>（模型自己报的 <code>totalTokens</code>，来自 provider 的真实统计），加后面几条消息的估算。</li>
+<li>没有 usage 可用的消息用估算：<code>chars ÷ 4</code> 的启发式，图片按 ~4800 字符估；实现刻意<b>保守偏高估</b>，宁早压不晚压。</li>
+</ul>
+<p>（<code>calculateContextTokens</code> 优先 <code>usage.totalTokens</code>，回退到 input+output+cacheRead+cacheWrite 求和。）</p>
+
+<h2>3. 何时触发：三种 reason</h2>
+<p>session 发出的 <code>compaction_start</code> 带 <code>reason</code>，三种来源：</p>
+<table>
+<thead><tr><th>reason</th><th>场景</th></tr></thead>
+<tbody>
+<tr><td><code>threshold</code></td><td>正常路径：某回合结束，上下文超过窗口−预留 → 后处理触发</td></tr>
+<tr><td><code>overflow</code></td><td>溢出恢复：上下文真的爆了/接近爆（含被 abort 的响应留下残留）→ 紧急压缩；每次 run 只尝试一次恢复</td></tr>
+<tr><td><code>manual</code></td><td>用户/应用主动调 <code>session.compact()</code></td></tr>
+</tbody>
+</table>
+<p>触发时机在 session 层：<strong>run 结束后的后处理</strong>（<code>_checkCompaction</code>），或<strong>下一条 prompt 提交前</strong>（catch 上次 abort 的残留）。压缩完若还不够，会再 continue 跑。</p>
+
+<h2>4. 切点：尽量别把一句话劈成两半</h2>
+<p><code>findCutPoint</code> 的逻辑（源码核实）：</p>
+<ol>
+<li>先找出「合法切点」——通常是 turn 起点的 user 消息位置（<code>compaction</code> 条目本身不算）。</li>
+<li>从最新往回走，累积消息估算 token，直到达到 <code>keepRecentTokens</code> 预算 → 锁定一个「尽量新的合法切点」。</li>
+<li>若切点落在某个 turn 中间（消息太大塞不下预算），会标记 <code>isSplitTurn</code>：把该 turn 的<strong>前半段单独压缩</strong>，后半段真实保留——这样断掉的回合也能续上。</li>
+</ol>
+<p>结果：<strong>旧的压缩成总结，最近的 ~20k token 保持原样</strong>。模型看到的是一份「checkpoint + 新近原始消息」，不是全部被抽象掉。</p>
+
+<h2>5. 总结长什么样</h2>
+<p>总结由模型按<strong>固定的结构化格式</strong>生成（<code>SUMMARIZATION_PROMPT</code>，源码里就是一大段指令），要让「另一个 LLM 能接着干」——这是刻意设计：压缩的产物是给未来模型当上下文用的，不是给人看的纪要。分 turn 前缀另有专门格式（Original Request / Early Progress / Context for Suffix）。可用 <code>customInstructions</code> 引导总结侧重（比如「记住待办事项」）。</p>
+<p>压缩本身要调用模型，所以也会产生 usage；若总结生成失败，session 有一套 <code>summarization_retry_*</code> 事件做重试。压缩结果作为 <code>compaction</code> 条目写进会话文件——旧消息不删，只是不再进上下文。</p>
+
+<h2>6. 检验</h2>
+
+<div class="quiz" data-explain="shouldCompact 即 contextTokens > contextWindow − reserveTokens（默认预留 16384）。">
+<p class="q">Q1. 压缩的触发条件本质是什么？</p>
+<div class="opts">
+<button data-correct="false">消息条数超过某个固定上限</button>
+<button data-correct="true">上下文估用超过窗口减去预留</button>
+<button data-correct="false">会话文件大小超过阈值即触发</button>
+<button data-correct="false">每次 run 结束必定压缩一次</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="usage 用模型自报的 totalTokens 最省；无 usage 时按 chars/4 保守估算，图片约 4800 字符。">
+<p class="q">Q2. 上下文 token 数最优先怎么得到？</p>
+<div class="opts">
+<button data-correct="false">本地重算每一条消息的字符数</button>
+<button data-correct="true">用最后有效助手消息的 usage 统计</button>
+<button data-correct="false">向模型接口查询当前窗口占用</button>
+<button data-correct="false">按平均每条固定 100 token 估算</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="切点尽量选在 turn 起点；若单回合塞不进预算就标记 splitTurn，把回合前半单独压缩、后半保留。">
+<p class="q">Q3. 切点选择的目标是？</p>
+<div class="opts">
+<button data-correct="false">从最旧处删到满足窗口即可</button>
+<button data-correct="true">在回合边界砍且保留最近预算</button>
+<button data-correct="false">一律在会话正中间平均切一刀</button>
+<button data-correct="false">优先删掉所有工具结果消息</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="压缩也要调模型生成结构化 checkpoint 总结，是给后续 LLM 续作用、非给人看的纪要；失败有 summarization_retry。">
+<p class="q">Q4. 关于压缩产物，哪个说法正确？</p>
+<div class="opts">
+<button data-correct="false">压缩零成本且不调用任何模型</button>
+<button data-correct="true">生成结构化总结供后续续作</button>
+<button data-correct="false">压缩后旧消息立即被物理删除</button>
+<button data-correct="false">总结是给用户读的活动纪要</button>
+</div>
+</div>
+
+<h2>7. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/src/core/compaction/compaction.ts</code> —— 读 <code>DEFAULT_COMPACTION_SETTINGS / shouldCompact / findCutPoint / estimateTokens</code> 与 <code>compact()</code> 里的 SUMMARIZATION_PROMPT。</li>
+<li><code>packages/coding-agent/src/core/agent-session.ts</code> —— 读 <code>_checkCompaction / _runAutoCompaction</code>（reason 三种）与 <code>compaction_start/end</code> 事件。</li>
+<li><code>packages/coding-agent/docs/sdk.md</code> —— Settings 一节里 <code>compaction: { enabled, … }</code> 的覆盖写法。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“我 workflow 的每步其实不需要长上下文，是不是应该干脆关掉 compaction、每步新会话？”“keepRecentTokens 设多大对长代码任务合适？”</p>
+<p class="sources">下一课：⑦ 持久化与 SessionManager —— JSONL、树、分支。源码：coding-agent/src/core/session-manager.ts + docs/session-format.md。</p>
+</div>
+
+</main>
+</body>
+</html>

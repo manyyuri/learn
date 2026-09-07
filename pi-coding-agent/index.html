@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi-coding-agent 架构课 · 课程首页</title>
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body>
+<main>
+
+<p class="meta">COURSE HOME · 10 课 + 速查卡 · 主题：吃透 pi-coding-agent 架构</p>
+
+<h1>pi-coding-agent 架构课</h1>
+<p class="lead">目标：你已用 SDK 做出固定流程软件开发工作流应用，本课把这些架构机器真正讲透——从最内层的 agent 循环一路到驾驶舱，最后用回你的 workflow。</p>
+
+<div class="callout"><strong>怎么用</strong>：按顺序读；每课 15–25 分钟，含测验（点选项即时反馈）与「一手阅读」源码清单。全部内容经源码核实。语言：中文，术语保留英文。</div>
+
+<h2>课程表</h2>
+<table>
+<thead><tr><th>#</th><th>标题</th><th>核心问题</th></tr></thead>
+<tbody>
+<tr><td><a href="lessons/0001-prompt-journey.html">01</a></td><td><a href="lessons/0001-prompt-journey.html">一条 prompt 的完整旅程</a></td><td>一次 prompt 如何展开成一串回合？事件在哪一拍发出？</td></tr>
+<tr><td><a href="lessons/0002-agent-core-internals.html">02</a></td><td><a href="lessons/0002-agent-core-internals.html">Agent 核心内部</a></td><td>state 里有什么？五个钩子各自在哪？单飞与队列的源码形态？</td></tr>
+<tr><td><a href="lessons/0003-tools.html">03</a></td><td><a href="lessons/0003-tools.html">工具系统</a></td><td>工具定义如何变成运行时形态？参数在哪校验？并行还是串行？</td></tr>
+<tr><td><a href="lessons/0004-model-runtime.html">04</a></td><td><a href="lessons/0004-model-runtime.html">模型层 ModelRuntime</a></td><td>模型从哪来？认证几层来源？「存在」和「能用」的区别？</td></tr>
+<tr><td><a href="lessons/0005-session-pipeline.html">05</a></td><td><a href="lessons/0005-session-pipeline.html">Session 深潜：prompt() 管线</a></td><td>一句话进门后要过哪些检查？agent_settled 从哪来？</td></tr>
+<tr><td><a href="lessons/0006-compaction.html">06</a></td><td><a href="lessons/0006-compaction.html">压缩 Compaction</a></td><td>何时触发、切点怎么选、总结是什么格式？</td></tr>
+<tr><td><a href="lessons/0007-session-tree.html">07</a></td><td><a href="lessons/0007-session-tree.html">持久化与 SessionManager</a></td><td>JSONL 长什么样？会话为什么是树？怎么分支？</td></tr>
+<tr><td><a href="lessons/0008-resource-loader.html">08</a></td><td><a href="lessons/0008-resource-loader.html">资源加载 ResourceLoader</a></td><td>扩展/技能/模板/上下文从哪些目录被扫出来？</td></tr>
+<tr><td><a href="lessons/0009-modes.html">09</a></td><td><a href="lessons/0009-modes.html">三种 Mode 与 SDK</a></td><td>interactive / print / rpc 的关系？SDK vs RPC 怎么选？</td></tr>
+<tr><td><a href="lessons/0010-apply-to-workflow.html">10</a></td><td><a href="lessons/0010-apply-to-workflow.html">综合：用回你的 workflow</a></td><td>长会话还是每步新会话？跨步传什么？自检表。</td></tr>
+</tbody>
+</table>
+
+<h2>配套</h2>
+<ul>
+<li><a href="reference/architecture-map.html">架构速查卡</a> —— 五层图 + 旅程图 + 事件表 + 关键数字，一页可打印。</li>
+<li><a href="GLOSSARY.md">术语表 GLOSSARY.md</a> —— 全课规范用语（Markdown，可原文查看）。</li>
+<li><a href="MISSION.md">任务书 MISSION.md</a> —— 本课程的存在理由。</li>
+<li><a href="RESOURCES.md">资源清单 RESOURCES.md</a> —— 一手资料与源码导航。</li>
+</ul>
+
+<div class="footer">
+<p>导师提示：读完每课后，把那节的「一手阅读」文件翻一遍再答测验，收获最大。有任何卡住的地方，直接向导师提问。</p>
+</div>
+
+</main>
+</body>
+</html>

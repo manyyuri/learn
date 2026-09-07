@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 9 课 · 三种 Mode 与 SDK 的关系</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0009 · pi-coding-agent 架构课 · <a href="../lessons/0008-resource-loader.html">← 第 8 课</a></p>
+
+<h1>三种 Mode：同一台引擎的三种驾驶舱</h1>
+<p class="lead">你平时敲 <code>pi</code> 进的是交互式 TUI；<code>pi "任务"</code> 走的是 print；还能 <code>pi --mode rpc</code> 以 JSON 协议对外服务。三者共用同一套核心与 session 逻辑，只是「驾驶员」不同。这一课理清它们的关系，以及 SDK 站在哪里。</p>
+
+<div class="callout"><strong>本课成果</strong>：理解 mode 是「贴在 AgentSessionRuntime 上的壳」，看清 interactive / print / rpc 各适合什么，以及「SDK 直连 vs RPC 子进程」的取舍——这决定你 workflow 应用要不要、怎么暴露 agent 服务。</div>
+
+<h2>1. 共同地基：AgentSessionRuntime</h2>
+<p>三种 mode 都构造在同一个 <code>runtime</code> 上（第 1 课的地图第 ④ 层）。runtime 的意义：它拥有「替换当前会话」的能力（new / resume / fork / import）——因为换会话时要重建与 cwd 绑定的服务，单靠一个 <code>AgentSession</code> 不够。</p>
+<pre><code>const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager });
+// runtime.session 会在 newSession()/switchSession()/fork() 之后变化
+// 换会话后要重新订阅：subscriptions 绑定在 session 上，不在 runtime 上</code></pre>
+<p>SDK 文档里那段 <code>createRuntime</code> 工厂（<code>createAgentSessionServices → createAgentSessionFromServices</code>）反复出现，就是为了给三种 mode 提供统一底座。你现在自己写驱动时，大概率也要先搭这个 runtime。</p>
+
+<h2>2. 三个驾驶舱</h2>
+<table>
+<thead><tr><th>Mode</th><th>形态</th><th>典型入口</th><th>适合</th></tr></thead>
+<tbody>
+<tr><td><strong>Interactive</strong></td><td>全功能 TUI：编辑器、历史、全部内置命令</td><td><code>InteractiveMode(runtime, opts).run()</code></td><td>人机交互；你甚至可以复用其编辑器能力</td></tr>
+<tr><td><strong>Print</strong></td><td>单发：发 prompt、输出结果、退出</td><td><code>runPrintMode(runtime, { mode: "text"|"json", initialMessage })</code></td><td>脚本化「问一句答一句」；json 模式拿全事件流</td></tr>
+<tr><td><strong>RPC</strong></td><td>JSON-RPC over stdio 的常驻服务</td><td><code>runRpcMode(runtime)</code>；或直接 <code>pi --mode rpc --no-session</code></td><td>跨语言/子进程集成</td></tr>
+</tbody>
+</table>
+
+<h2>3. SDK vs RPC：两种嵌入方式</h2>
+<p>这是你 workflow 应用迟早要做的抉择（SDK 文档原文表意整理）：</p>
+<table>
+<thead><tr><th></th><th>SDK（同进程 import）</th><th>RPC（子进程 + JSON 协议）</th></tr></thead>
+<tbody>
+<tr><td>类型安全</td><td>完全（TS 类型直连）</td><td>弱（协议文本）</td></tr>
+<tr><td>进程隔离</td><td>无（共享内存/崩溃同生）</td><td>有（agent 崩了宿主不崩）</td></tr>
+<tr><td>语言</td><td>限 Node/TS</td><td>任意语言</td></tr>
+<tr><td>状态访问</td><td>直接拿 state/messages</td><td>经协议消息</td></tr>
+<tr><td>每步定制</td><td>随时换 model/tools/钩子</td><td>受限</td></tr>
+</tbody>
+</table>
+<div class="callout"><strong>给你的判断准则</strong>：你的「固定 workflow」应用是<strong>编排者</strong>——每个步骤要精细控制工具、上下文、模型 → 用 SDK 直连最顺（这也是你选的路）。若以后你想把 agent 能力暴露给「别的语言写的调度器」，或想隔离崩溃，才切 RPC。</div>
+
+<h2>4. 三种 mode 是怎么共享代码的</h2>
+<p>它们没有各自复制一份 agent 逻辑。共同的管线是：<code>mode → createAgentSessionRuntime → createAgentSessionFromServices（造 AgentSession）→ Agent（跑循环）→ pi-ai（调模型）</code>。mode 层只负责「输入怎么来、输出怎么呈现」：interactive 接键盘与 TUI，print 接参数与 stdout，rpc 接 stdin 的 JSON-RPC 帧与 stdout 响应。想加第四种驾驶舱（比如 webhook 触发、队列消费）？照这个模式写一个就行。</p>
+
+<h2>5. 检验</h2>
+
+<div class="quiz" data-explain="mode 只是贴在 AgentSessionRuntime 上的输入输出壳；核心循环、session、model 全部共享。">
+<p class="q">Q1. 三种 mode 的关系是什么？</p>
+<div class="opts">
+<button data-correct="false">各自独立实现一套完整循环</button>
+<button data-correct="true">同一 runtime 上的不同驾驶舱</button>
+<button data-correct="false">print 是 interactive 的剪裁版本</button>
+<button data-correct="false">rpc 独立于 runtime 单独运行</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="换会话要重建 cwd 绑定服务并替换 active session，这个能力在 runtime 层（newSession/fork/switch）。">
+<p class="q">Q2. 为何 mode 需要 runtime 而非单个 session？</p>
+<div class="opts">
+<button data-correct="false">session 无法直接发送任何 prompt</button>
+<button data-correct="true">换新会话需重建绑定服务</button>
+<button data-correct="false">runtime 负责模型参数的缓存</button>
+<button data-correct="false">session 不支持订阅事件流</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="SDK 同进程类型安全可拿 state 可精细定制；RPC 子进程隔离、跨语言，但控制粗。">
+<p class="q">Q3. 以下哪条属于「选 RPC 而非 SDK」的理由？</p>
+<div class="opts">
+<button data-correct="false">需要拿到直接的 TS 类型提示</button>
+<button data-correct="true">要进程隔离且跨语言集成</button>
+<button data-correct="false">要随时替换单步的工具集合</button>
+<button data-correct="false">要直接读 agent 的 messages 状态</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="模式层只负责输入来源与输出呈现；跑循环、session、model 都走共享管线。">
+<p class="q">Q4. 想加第四种「驾驶舱」，正确做法是？</p>
+<div class="opts">
+<button data-correct="false">复制 interactive 代码再改输入源</button>
+<button data-correct="true">照模式在 runtime 上写个新壳</button>
+<button data-correct="false">绕过 runtime 直接重写 agent 循环</button>
+<button data-correct="false">给 pi CLI 加一个隐藏命令行参数</button>
+</div>
+</div>
+
+<h2>6. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/src/modes/index.ts</code> 与 <code>print-mode.ts</code> —— 看 mode 入口签名。</li>
+<li><code>packages/coding-agent/docs/sdk.md</code> —— 「Run Modes」整节（三种 mode 的完整样板代码）。</li>
+<li><code>packages/coding-agent/docs/rpc.md</code> —— RPC JSON 协议细节。</li>
+<li><code>examples/sdk/13-session-runtime.ts</code> —— runtime 替换会话的最小实现。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“runPrintMode 的 json 模式到底输出哪些事件、什么结构？”“我自建服务想要并发多个 agent，SDK 里要起多个 session 还是一个 runtime 多个 session？”</p>
+<p class="sources">最后一课：⑩ 综合——把九节课的架构知识用回你的固定 workflow 应用。设计决策课，无新源码。</p>
+</div>
+
+</main>
+</body>
+</html>

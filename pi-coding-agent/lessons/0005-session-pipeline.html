@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 5 课 · Session 深潜：prompt() 的前处理管线</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0005 · pi-coding-agent 架构课 · <a href="../lessons/0004-model-runtime.html">← 第 4 课</a></p>
+
+<h1>Session 深潜：一条 prompt 进门后、进 agent 前</h1>
+<p class="lead">第 1 课我们看到了旅程，但 <code>session.prompt(text)</code> 在把消息交给 <code>agent.prompt</code> 之前，还有整整一条前处理管线。这一课把 <code>agent-session.ts</code> 里 <code>prompt()</code> 方法逐段拆开。</p>
+
+<div class="callout"><strong>本课成果</strong>：能说出 <code>prompt()</code> 前处理的每一步顺序及其目的——这对你的 workflow 很重要：你以为发出去的就是那句话，实际它可能先被当成命令、被 skill 块改写、被扩展拦截、被 auth 校验拦下。</div>
+
+<h2>1. 管线全景（源码核实，按真实顺序）</h2>
+<p>调用 <code>session.prompt(text, options)</code> 后，依序发生：</p>
+<table>
+<thead><tr><th>#</th><th>检查 / 动作</th><th>若命中</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>/xxx</code> 开头？→ 查扩展命令</td><td>命令立即执行（哪怕在流式），不进入 agent</td></tr>
+<tr><td>2</td><td>压缩进行中？</td><td>抛错拒绝新 prompt</td></tr>
+<tr><td>3</td><td>扩展 <code>input</code> 拦截</td><td>可 <code>handled</code>（吞掉）或 <code>transform</code>（改写文本/图片）</td></tr>
+<tr><td>4</td><td>展开 <code>/skill:name</code> 块 与 prompt 模板 <code>/name</code></td><td>文本被替换为展开内容</td></tr>
+<tr><td>5</td><td>正在流式？</td><td>必须有 <code>streamingBehavior</code>，否则抛错；走 steer/followUp 队列</td></tr>
+<tr><td>6</td><td>冲刷挂起的 bash / 自定义消息</td><td>并入本次提交</td></tr>
+<tr><td>7</td><td>校验已选模型</td><td>无模型 → 抛 <code>No model selected</code></td></tr>
+<tr><td>8</td><td>校验认证（hasConfiguredAuth / checkAuth）</td><td>无 key → 抛错（OAuth 过期有专门文案）</td></tr>
+<tr><td>9</td><td>压缩检查（catch 上次被 abort 的残留）</td><td>需要 → 先压缩再发</td></tr>
+<tr><td>10</td><td>组消息：user 消息 + 挂起的 nextTurn 消息 + 扩展 <code>before_agent_start</code> 注入的 custom 消息</td><td>应用扩展改写的 systemPrompt</td></tr>
+<tr><td>11</td><td><code>preflightResult(true)</code> → <code>_runAgentPrompt(messages)</code></td><td>真正进入 agent</td></tr>
+</tbody>
+</table>
+<div class="callout"><strong>记住第 5 步</strong>：流式期间 <code>prompt()</code> 没有 <code>streamingBehavior</code> 会直接抛错——这是 single-flight 约束在上层的体现（第 1、2 课）。</div>
+
+<h2>2. 跑起来之后：run + 后处理循环</h2>
+<pre><code>_runAgentPrompt(messages) {
+  this._isAgentRunActive = true;
+  try {
+    await this.agent.prompt(messages);
+    while (await this._handlePostAgentRun()) {   // ← 后处理
+      await this.agent.continue();
+    }
+  } finally {
+    // 清理 override、冲刷消息、发 agent_settled
+    await this._emitAgentSettled();
+  }
+}</code></pre>
+<p><code>_handlePostAgentRun()</code> 决定要不要再 <code>agent.continue()</code> 一次，按序判断：</p>
+<ol>
+<li>最后一条助手消息<strong>可重试错误</strong>？→ 走 <code>_prepareRetry</code>（自动重试）</li>
+<li>该压缩？→ <code>_checkCompaction</code>（第 6 课详述）</li>
+<li>agent_end 扩展处理器排队了消息？→ <code>agent.hasQueuedMessages()</code></li>
+</ol>
+<p>三者任一命中就 <code>continue()</code> 再跑一轮。全部否定 → finally 里发 <code>agent_settled</code>。<strong>这就是你在第 1 课看到的 <code>agent_settled</code> 的真正出处——它总是在 retry/compaction 决策做完之后。</strong></p>
+
+<h2>3. 事件转发与持久化（_handleAgentEvent）</h2>
+<p>session 订阅了 agent 的事件（构造时 <code>this.agent.subscribe(this._handleAgentEvent)</code>）。每个 agent 事件到达时：</p>
+<ol>
+<li><strong>先清队列记账</strong>：若该 user 消息来自 steer/followUp 队列，从 session 侧的队列快照移除并发 <code>queue_update</code>（保证 UI 看到最新队列状态）</li>
+<li><strong>扩展先听</strong>：<code>_emitExtensionEvent(event)</code> 把事件广播给扩展</li>
+<li><strong>再广播给订阅者</strong>：<code>agent_end</code> 会额外附上 <code>willRetry</code> 标记</li>
+<li><strong>持久化</strong>：<code>message_end</code> 时把消息写进 SessionManager——custom → <code>appendCustomMessageEntry</code>；user/assistant/toolResult → <code>appendMessage</code>；assistant 消息同时被记录为 <code>_lastAssistantMessage</code> 供后处理用</li>
+</ol>
+<p>这个顺序解释了订阅者的一个直觉陷阱：<strong>扩展和订阅者看到的都是转发后的同一批事件，但持久化在 message_end 才发生</strong>——所以「订阅到事件」不等于「已落盘」。</p>
+
+<h2>4. 对你 workflow 的三条启示</h2>
+<ul>
+<li><strong>「发一句话」可能是多条消息</strong>：user 消息 + 挂起的 custom 消息会被一起提交。扩展在 <code>before_agent_start</code> 里注入的消息，会先于你这句话被模型看到。</li>
+<li><strong>auth 错误是同步前置检查</strong>：没 key 时 <code>prompt()</code> 抛的是「你没配好」而不是让模型跑完报错。你可以在步骤开始前用 <code>modelRuntime.getAvailable()</code> 预检，给出干净的错误页。</li>
+<li><strong>命令/模板扩展发生在最前面</strong>：如果你的 workflow 提示词以 <code>/</code> 开头且被注册成命令，它根本不会走到 agent——这既是功能也可能是坑。</li>
+</ul>
+
+<h2>5. 检验</h2>
+
+<div class="quiz" data-explain="流式期间 prompt() 必须带 streamingBehavior，否则抛错；这是 single-flight 的体现。">
+<p class="q">Q1. 流式进行中再调 session.prompt(text) 不带选项会？</p>
+<div class="opts">
+<button data-correct="false">静默排队等当前回合结束后发</button>
+<button data-correct="true">抛错，要求指定 streamingBehavior</button>
+<button data-correct="false">立刻中断当前回合并插入文本</button>
+<button data-correct="false">先压缩再追加到消息末尾</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="后处理按序：可重试错误→retry；需要→compaction；扩展排队→continue。全部否定才 agent_settled。">
+<p class="q">Q2. agent_settled 在什么时机发出？</p>
+<div class="opts">
+<button data-correct="false">agent_end 事件广播的同一时刻</button>
+<button data-correct="true">retry 与 compaction 决策结束后</button>
+<button data-correct="false">最后一条消息 message_end 时</button>
+<button data-correct="false">agent 核心 isStreaming 置 false 时</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="事件到达时先让扩展听（_emitExtensionEvent），再广播给 subscribe 订阅者；agent_end 附 willRetry。">
+<p class="q">Q3. 事件转发中扩展与订阅者的顺序是？</p>
+<div class="opts">
+<button data-correct="false">订阅者先听，扩展后听并过滤</button>
+<button data-correct="true">扩展先听，订阅者随后接收</button>
+<button data-correct="false">两者并行不保证顺序关系</button>
+<button data-correct="false">按注册时间先后依次广播</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="persist 发生在 message_end：custom→appendCustomMessageEntry；user/assistant/toolResult→appendMessage。">
+<p class="q">Q4. 消息持久化发生在哪个事件回调里？</p>
+<div class="opts">
+<button data-correct="false">agent_end 汇总整批一并写盘</button>
+<button data-correct="true">message_end 时逐条写入会话</button>
+<button data-correct="false">turn_end 把该回合消息写入</button>
+<button data-correct="false">agent_settled 时才统一落盘</button>
+</div>
+</div>
+
+<h2>6. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/src/core/agent-session.ts</code> —— 精读 <code>prompt()</code>（管线 1–11 步）、<code>_runAgentPrompt / _handlePostAgentRun</code>（后处理）、<code>_handleAgentEvent</code>（转发+持久化）。</li>
+<li>对照 <code>docs/sdk.md</code> 的「Prompting and Message Queueing」看选项语义。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“我想在 workflow 每步前做 auth 预检，具体怎么读 getAvailable？”“扩展在 before_agent_start 注入的消息，我怎么在 session 里也看到？”</p>
+<p class="sources">下一课：⑥ 压缩 Compaction —— 何时触发、如何切点、总结长什么样。源码：coding-agent/src/core/compaction/。</p>
+</div>
+
+</main>
+</body>
+</html>

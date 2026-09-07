@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 8 课 · 资源加载 ResourceLoader</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0008 · pi-coding-agent 架构课 · <a href="../lessons/0007-session-tree.html">← 第 7 课</a></p>
+
+<h1>资源加载：extensions / skills / prompts 从哪来</h1>
+<p class="lead">session 用的工具、系统提示词里的技能、<code>/命令</code>、AGENTS.md 上下文……这些「资源」不是写死的，而是由 <code>ResourceLoader</code> 在启动时从项目目录和全局目录<strong>发现</strong>出来的。这一课看清发现规则，以及你如何注入 override。</p>
+
+<div class="callout"><strong>本课成果</strong>：知道默认发现规则（项目 vs 全局、哪些目录被扫），理解 ResourceLoader 的「reload 一次、读四次」形态，并会用 override 钩子把自定义资源塞进加载结果。</div>
+
+<h2>1. 谁加载什么</h2>
+<p><code>createAgentSession()</code> 不直接读磁盘——它从一个 <code>ResourceLoader</code> 拿资源。默认是 <code>DefaultResourceLoader</code>，职责（reload 后可取）：</p>
+<table>
+<thead><tr><th>资源</th><th>getter</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td>扩展 Extensions</td><td><code>getExtensions()</code></td><td>注册工具 / 命令 / 事件监听 / provider（.ts 文件，经扩展加载器执行）</td></tr>
+<tr><td>技能 Skills</td><td><code>getSkills()</code></td><td>SKILL.md，注入系统提示词供 agent 调用（配了读文件工具时）</td></tr>
+<tr><td>提示模板 Prompts</td><td><code>getPrompts()</code></td><td><code>/命令</code> 的展开来源</td></tr>
+<tr><td>主题 Themes</td><td><code>getThemes()</code></td><td>TUI 视觉</td></tr>
+<tr><td>上下文文件 Context</td><td><code>getAgentsFiles()</code></td><td>AGENTS.md / CLAUDE.md，参与组装系统提示词</td></tr>
+</tbody>
+</table>
+
+<h2>2. 默认发现规则</h2>
+<p>两个根：项目 <code>cwd</code> 与全局 <code>agentDir</code>（默认 <code>~/.pi/agent</code>，用 <code>getAgentDir()</code> 取）：</p>
+<table>
+<thead><tr><th>资源</th><th>项目侧 (cwd)</th><th>全局侧 (agentDir)</th></tr></thead>
+<tbody>
+<tr><td>extensions</td><td><code>.pi/extensions/</code></td><td><code>extensions/</code></td></tr>
+<tr><td>skills</td><td><code>.pi/skills/</code>、<code>.agents/skills/</code>（含祖先目录，到 git 根为止）</td><td><code>skills/</code>、<code>~/.agents/skills/</code></td></tr>
+<tr><td>prompts</td><td><code>.pi/prompts/</code></td><td><code>prompts/</code></td></tr>
+<tr><td>context files</td><td><code>AGENTS.md</code>（从 cwd 向上找，还认 <code>AGENTS.override.md</code>/<code>CLAUDE.md</code>）</td><td>全局 <code>AGENTS.md</code></td></tr>
+</tbody>
+</table>
+<p>上下文文件候选列表（源码核实）：<code>AGENTS.override.md → AGENTS.md → CLAUDE.md</code>，逐级向上直到 git 根或文件系统根。</p>
+<div class="callout"><strong>技能为何「需要读文件工具」才注入</strong>：SKILL.md 通常很大，塞进提示词浪费窗口。system-prompt 组装时（<code>system-prompt.ts</code>）只在有 <code>read</code> 类工具时把技能清单注入，让 agent <strong>按需去读文件</strong>——这是上下文经济的细节设计。</div>
+
+<h2>3. 扩展能做什么（ExtensionAPI）</h2>
+<p>扩展是一个工厂函数 <code>(pi) =&gt; {…}</code>，拿到的 <code>pi</code>（ExtensionAPI，源码 <code>loader.ts</code>）至少含：</p>
+<ul>
+<li><code>pi.on(event, handler)</code> —— 订阅生命周期事件（agent_start/agent_end/tool 相关…）</li>
+<li><code>pi.registerTool(tool)</code> —— 注册工具（复用 ToolDefinition 形态，见第 3 课）</li>
+<li><code>pi.registerCommand(name, options)</code> —— 注册 <code>/命令</code></li>
+<li><code>pi.registerProvider(...)</code> —— 注册自定义 model provider</li>
+</ul>
+<p>扩展还可以 <code>pi.sendMessage</code> 主动发起一轮 agent、注入自定义消息（custom 角色）等。扩展文件经加载器做模块解析后执行，errors 会收集为 <code>{ path, error }</code> 列表。</p>
+
+<h2>4. 用 override 钩子改加载结果</h2>
+<p>SDK 里你不必真在磁盘放文件——<code>DefaultResourceLoader</code> 构造选项提供纯代码注入点：</p>
+<pre><code>const loader = new DefaultResourceLoader({
+  systemPromptOverride: (base) => `${base}\n\nBe concise.`,  // 改系统提示词
+  skillsOverride:      (cur) =&gt; ({ ...cur, skills: [...cur.skills, customSkill] }),
+  agentsFilesOverride: (cur) =&gt; ({ ...cur, agentsFiles: [...cur.agentsFiles, virtualFile] }),
+  promptsOverride:     (cur) =&gt; ({ ...cur, prompts: [...cur.prompts, customCommand] }),
+  extensionFactories:  [ (pi) =&gt; { pi.on("agent_start", …); } ],  // 内联扩展
+  additionalExtensionPaths: ["/path/to/ext.ts"],
+});
+await loader.reload();
+const { session } = await createAgentSession({ resourceLoader: loader });</code></pre>
+<p>想完全掌控（不要任何磁盘发现）：每个 getter 都可返回空，配 <code>tools/customTools</code> 只开你要的——这就是 SDK 示例 <code>12-full-control.ts</code> 做的事。注意 <code>reload()</code> 是异步的，必须在 <code>createAgentSession</code> 前 await。</p>
+
+<h2>5. 检验</h2>
+
+<div class="quiz" data-explain="reload 后通过 getExtensions/getSkills/getPrompts/getThemes/getAgentsFiles 暴露五类资源。">
+<p class="q">Q1. ResourceLoader 加载后暴露哪些资源类别？</p>
+<div class="opts">
+<button data-correct="false">只有扩展与工具两种资源</button>
+<button data-correct="true">扩展技能提示模板主题与上下文</button>
+<button data-correct="false">模型目录与认证凭据两种</button>
+<button data-correct="false">会话文件与设置文件的封装</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="技能清单只有在存在可读文件工具时才注入提示词，让 agent 按需读 SKILL.md，节省窗口。">
+<p class="q">Q2. 为什么技能不直接把全文塞进提示词？</p>
+<div class="opts">
+<button data-correct="false">因为 SKILL.md 不允许被读取内容</button>
+<button data-correct="true">按需读文件以节省上下文窗口</button>
+<button data-correct="false">技能内容属于机密不发给模型</button>
+<button data-correct="false">只有提示模板才允许进入提示词</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="扩展工厂拿到的 pi 提供 on/registerTool/registerCommand/registerProvider 等（loader.ts）。">
+<p class="q">Q3. 扩展工厂拿到的 pi 对象能做什么？</p>
+<div class="opts">
+<button data-correct="false">只读遍历，不能注册任何内容</button>
+<button data-correct="true">订阅事件并注册工具与命令</button>
+<button data-correct="false">只能修改全局设置与主题</button>
+<button data-correct="false">只能读取会话历史不能扩展</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="想纯代码注入而不写磁盘文件，用 skillsOverride/agentsFilesOverride/promptsOverride/extensionFactories 这些 override 钩子。">
+<p class="q">Q4. 不想在磁盘放文件，如何在会话里加自定义 skill？</p>
+<div class="opts">
+<button data-correct="false">把文件写到系统的临时目录里</button>
+<button data-correct="true">用 DefaultResourceLoader 的 skillsOverride 注入</button>
+<button data-correct="false">直接改 node_modules 里的内置技能</button>
+<button data-correct="false">通过环境变量指向虚拟文件路径</button>
+</div>
+</div>
+
+<h2>6. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/src/core/resource-loader.ts</code> —— 看 <code>reload()</code> 的五类发现与 override 注入点。</li>
+<li><code>packages/coding-agent/docs/extensions.md</code> —— 扩展 API 全量：registerTool/commands/events/sendMessage 等。</li>
+<li><code>packages/coding-agent/src/core/system-prompt.ts</code> —— 看系统提示词如何由 AGENTS.md + skills 组装。</li>
+<li><code>examples/sdk/06-extensions.ts</code>、<code>12-full-control.ts</code> —— 可运行示例。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“扩展文件加载器的模块解析怎么工作的，为什么能 import pi-ai 但有的包不行？”“SDK 场景我该不该开 skills 发现，还是关掉更可控？”</p>
+<p class="sources">下一课：⑨ 三种 Mode —— interactive / print / rpc 与 SDK 的关系。源码：coding-agent/src/modes/。</p>
+</div>
+
+</main>
+</body>
+</html>

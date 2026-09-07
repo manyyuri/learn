@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 4 课 · 模型层 ModelRuntime</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0004 · pi-coding-agent 架构课 · <a href="../lessons/0003-tools.html">← 第 3 课</a></p>
+
+<h1>模型层：ModelRuntime 与认证</h1>
+<p class="lead">agent 循环要「调模型」，可模型从哪来？哪些模型能用？API key 从哪找？——这些都是 <code>ModelRuntime</code> 的职责。它是 <code>pi-ai</code> 模型目录之上的「运行时外壳」，也是你 SDK 代码里 <code>await ModelRuntime.create()</code> 那个对象。</p>
+
+<div class="callout"><strong>本课成果</strong>：弄清模型目录（catalog）、三层认证来源、可用性快照的语义，以及「你该用哪个对象挑模型」——这些决定了你 workflow 里怎么给不同步骤分配不同模型。</div>
+
+<h2>1. 位置与职责</h2>
+<p><code>ModelRuntime</code> 在 <code>coding-agent/src/core/model-runtime.ts</code>，实现 <code>pi-ai</code> 的 <code>Models</code> 接口并拥有认证存储（credentials）。职责三块：</p>
+<ul>
+<li><strong>模型目录</strong>：内置模型元数据 + 自定义模型（<code>models.json</code>）+ 远程目录缓存（<code>models-store.json</code>）</li>
+<li><strong>认证</strong>：api key / OAuth 的存取与解析</li>
+<li><strong>可用性</strong>：回答「哪个模型当前真能用」</li>
+</ul>
+<p>它不参与 agent 循环——循环只知道「给我一个 <code>Model</code> 对象」，而这个对象由 session 在 <code>prompt()</code> 时从 runtime 选定（第 5 课会看到 <code>hasConfiguredAuth</code> 校验就在 prompt 里）。</p>
+
+<h2>2. 目录从哪里来</h2>
+<pre><code>const modelRuntime = await ModelRuntime.create();          // 默认：恢复本地缓存
+const r2 = await ModelRuntime.create({ allowModelNetwork: true, modelRefreshTimeoutMs: 15000 }); // 联网刷新
+await modelRuntime.refresh({ allowNetwork: true, force: true, signal }); // 主动强制刷新</code></pre>
+<p>要点（sdk.md + 源码核实）：</p>
+<ul>
+<li><code>create()</code> 默认<strong>只恢复本地缓存的目录</strong>，不联网。想首次联网拉目录，显式开 <code>allowModelNetwork</code> 并给它一个超时。</li>
+<li>网络刷新按 provider 每 4 小时节流一次，除非 <code>force: true</code>。</li>
+<li><code>PI_OFFLINE</code> 关闭一切模型网络访问。</li>
+<li>目录持久化在 <code>~/.pi/agent/models-store.json</code>（可换 <code>modelsStorePath</code>）。</li>
+</ul>
+
+<h2>3. 认证的三层来源</h2>
+<p>「这个 provider 有没有 key？」的解析优先级（sdk.md 明示）：</p>
+<table>
+<thead><tr><th>优先级</th><th>来源</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>运行时覆盖 <code>setRuntimeApiKey(provider, key)</code>（不落盘，测试/临时 key 用它）</td></tr>
+<tr><td>2</td><td>存储的凭据 <code>~/.pi/agent/auth.json</code>（api key 或 OAuth token，由 <code>login/logout</code> 维护）</td></tr>
+<tr><td>3</td><td>环境变量 <code>ANTHROPIC_API_KEY</code> 等</td></tr>
+<tr><td>4</td><td>fallback 解析器（<code>models.json</code> 里自定义 provider 的 key 模板）</td></tr>
+</tbody>
+</table>
+<p>可换目录：<code>ModelRuntime.create({ authPath, modelsPath })</code>，甚至注入任意 <code>pi-ai</code> 的 <code>CredentialStore</code>（如 <code>InMemoryCredentialStore</code>）。<strong>这行 API 是你做无副作用测试/多租户隔离的入口。</strong></p>
+
+<h2>4. 三个容易混的方法</h2>
+<table>
+<thead><tr><th>方法</th><th>含义</th><th>何时用</th></tr></thead>
+<tbody>
+<tr><td><code>getModel(providerId, modelId)</code></td><td>按 id 从目录找，<strong>不检查有没有 key</strong></td><td>你想指定某个已知模型</td></tr>
+<tr><td><code>getAvailable(providerId?)</code></td><td>只返回<strong>已配好认证</strong>的模型</td><td>给用户列「现在真能用哪些」</td></tr>
+<tr><td><code>checkAuth(providerId)</code> / <code>hasConfiguredAuth</code></td><td>查该 provider 的认证状态</td><td>prompt 前的 auth 校验（session 内部）</td></tr>
+</tbody>
+</table>
+<div class="callout"><strong>为什么区分</strong>：目录里模型再多，没 key 也调不动。<code>getModel</code> 答「存在吗」，<code>getAvailable</code> 答「能用吗」——你的 workflow 若是「自动选默认模型」，应该走 <code>getAvailable</code> 而不是 <code>getModel</code>，否则会选到没 key 的模型然后 prompt 抛错。</div>
+
+<h2>5. CLI 解析器：把字符串变成模型 + 思考等级</h2>
+<p>coding-agent 导出了两个解析器，把「<code>anthropic/claude-opus-4-5:high</code>」这种字符串解析成模型与 thinkingLevel：</p>
+<pre><code>const { model, error, warning } = resolveCliModel({ cliModel: "anthropic/claude-opus-4-5:high", modelRuntime });
+const { scopedModels, diagnostics } = await resolveModelScopeWithDiagnostics(["anthropic/*:high", "gpt-5"], modelRuntime);</code></pre>
+<p>你的 workflow 如果允许用户用配置字符串指定某一步的模型，这两个函数就是现成的解析器——语法、错误信息都和 pi CLI 一致，不用自己再造。</p>
+
+<h2>6. 检验</h2>
+
+<div class="quiz" data-explain="create() 只恢复本地缓存目录；联网刷新需显式 allowModelNetwork + 超时。">
+<p class="q">Q1. ModelRuntime.create() 默认会联网拉目录吗？</p>
+<div class="opts">
+<button data-correct="false">会，每次创建都强制拉最新</button>
+<button data-correct="true">不会，只恢复本地缓存目录</button>
+<button data-correct="false">会，但仅在缺少 api key 时</button>
+<button data-correct="false">取决于 auth.json 是否存在</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="getModel 只查目录存在性不查 key；getAvailable 只返回已配好认证的模型。">
+<p class="q">Q2. 想列出「当前真能用的模型」应调用？</p>
+<div class="opts">
+<button data-correct="false">getModel 逐 provider 遍历目录</button>
+<button data-correct="true">getAvailable 只返回有认证的</button>
+<button data-correct="false">checkAuth 循环手工过滤模型</button>
+<button data-correct="false">getProviders 返回所有提供商</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="优先级：运行时 key &gt; auth.json &gt; 环境变量 &gt; fallback。auth.json 由 login/logout 维护。">
+<p class="q">Q3. 认证解析中优先级最高的是哪一层？</p>
+<div class="opts">
+<button data-correct="false">环境变量如 ANTHROPIC_API_KEY</button>
+<button data-correct="true">运行时 setRuntimeApiKey 的覆盖</button>
+<button data-correct="false">auth.json 里存储的凭据记录</button>
+<button data-correct="false">models.json 里的回退模板</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="给不同步骤配不同模型时，用 CLI 字符串语法让 resolveCliModel/resolveModelScopeWithDiagnostics 解析，避免自造语法。">
+<p class="q">Q4. 想解析「anthropic/claude-opus-4-5:high」这样的字符串？</p>
+<div class="opts">
+<button data-correct="false">手工 split 冒号和斜杠即可</button>
+<button data-correct="true">用 resolveCliModel 解析成模型</button>
+<button data-correct="false">传给 createAgentSession 自动解析</button>
+<button data-correct="false">写入 settings 让运行时识别</button>
+</div>
+</div>
+
+<h2>7. 一手阅读</h2>
+<ul>
+<li><code>packages/coding-agent/docs/sdk.md</code> —— 「Model」「API Keys and OAuth」两节，与本课一一对应。</li>
+<li><code>packages/coding-agent/src/core/model-runtime.ts</code> —— 看 <code>create / getAvailable / getModel / checkAuth / setRuntimeApiKey / refresh</code> 的实现骨架。</li>
+<li><code>examples/sdk/02-custom-model.ts</code> 与 <code>09-api-keys-and-oauth.ts</code> —— 可运行示例。</li>
+</ul>
+
+<div class="footer">
+<p>不清楚就问导师，例如：“多租户场景想给每个用户隔离 key，ModelRuntime 该怎么拆？”“thinkingLevel 是模型级还是请求级？”</p>
+<p class="sources">下一课：⑤ Session 深潜 —— prompt() 的前处理管线与事件转发。源码：coding-agent/src/core/agent-session.ts。</p>
+</div>
+
+</main>
+</body>
+</html>

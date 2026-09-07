@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 1 课 · 一条 prompt 的完整旅程</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0001 · pi-coding-agent 架构课 · <a href="../index.html">课程首页</a> · <a href="../lessons/0002-agent-core-internals.html">下一课 →</a></p>
+
+<h1>一条 prompt 的完整旅程</h1>
+<p class="lead">你在自己的工作流应用里写过 <code>session.prompt("…")</code>，也 <code>session.subscribe()</code> 收过事件。这一课把那个黑盒拆开：一次 prompt 究竟经历了什么，为什么你会看到那些事件。</p>
+
+<div class="callout"><strong>本课成果（20 分钟内）</strong>：能画出一张图，说清「prompt → N 个回合 → agent 结束」的全过程、每个环节的职责，以及事件是在哪一拍发出的。</div>
+
+<h2>0. 从你已经会的东西出发</h2>
+<p>你在 SDK 层看到的典型代码是三层：</p>
+<pre><code>const { session } = await createAgentSession({ … });
+session.subscribe((event) => { … });   // 收事件
+await session.prompt("从需求澄清开始");  // 发一条 prompt</code></pre>
+<p>对此刻的你来说，<code>prompt()</code> 是黑盒、事件是「会来但顺序记不住」的东西。这一课之后，你会看到黑盒里其实只有一套很干净的机器。</p>
+
+<h2>1. 五层地图：先定位，再深入</h2>
+<p>pi 是 monorepo，跟你有关的核心分层从内到外是：</p>
+<table>
+<thead><tr><th>层</th><th>职责</th><th>真实位置（本地仓库）</th></tr></thead>
+<tbody>
+<tr><td><strong>① Agent 核心</strong></td><td>纯 LLM 交互循环：给定 messages+model+systemPrompt+tools，跑到「没有更多事要做」为止。不含任何 UI、不实现具体工具。</td><td><code>packages/agent/src/agent.ts</code><br><code>agent-loop.ts</code></td></tr>
+<tr><td><strong>② Model 层</strong></td><td>模型定义、provider、认证。给循环提供「能调用的模型对象」。</td><td><code>packages/ai</code>（<code>@earendil-works/pi-ai</code>）</td></tr>
+<tr><td><strong>③ Tools</strong></td><td>工具的「定义 + 执行函数」：read/bash/edit/write… 以及你自定义的 <code>defineTool</code>。</td><td><code>coding-agent/src/core/tools/</code></td></tr>
+<tr><td><strong>④ Session</strong></td><td>包住 Agent 的监护人：prompt 前处理（命令/模板/校验）、事件转发、retry、compaction、消息持久化。</td><td><code>coding-agent/src/core/agent-session.ts</code></td></tr>
+<tr><td><strong>⑤ 资源 + 模式 + 配置</strong></td><td>发现 skills/extensions/prompts/AGENTS.md；interactive/print/rpc 三种驱动壳；settings。</td><td><code>coding-agent/src/core/resource-loader.ts</code><br><code>coding-agent/src/modes/</code></td></tr>
+</tbody>
+</table>
+<div class="callout">记忆锚点：<strong>Agent 核心是最内层、UI 无关、工具实现无关的「循环引擎」；Session 是替你的应用操心杂事的那层。</strong>后面每课都会在这张地图里选一层深挖。</div>
+
+<h2>2. 核心心智模型：一次 prompt = 一串「回合」(turn)</h2>
+<p>最容易误解的一点：<strong>一次 <code>prompt()</code> 不是一次 LLM 问答，而是一串回合，直到「没有更多事要做」。</strong></p>
+<p>定义：一个 <strong>回合 (turn)</strong> = 一次「LLM 返回一条助手消息」的过程。助手消息里如果带了 <code>toolCall</code>，就得执行工具、把结果放回上下文、<strong>再来一个回合</strong>吃结果。</p>
+<p>循环有两个「为什么还要再来一回合」的来源：</p>
+<ul>
+<li><strong>内层（工具结果）</strong>：刚结束的回合带了工具调用 → 必须再来一回合吃工具结果。这是工具循环的主体。</li>
+<li><strong>外层（followUp 队列）</strong>：agent 本来要停了，但 follow-up 消息排队了 → 再开一批回合。这是 <code>session.followUp()</code> 的落点。</li>
+</ul>
+<pre><code>       一轮 run（一次 prompt / 一次 continue）
+       ┌──────────────────────────────────────────────┐
+  ┌────▼────┐   带 toolCall?     ┌─────────────────┐  │
+  │ 调 LLM  ├────是─────────────►│ 执行工具(们)     │  │
+  │ 得助手消息│                    │ 结果→toolResult  │  │
+  └────┬────┘                    │     消息入上下文  │  │
+       │ 否                       └────────▲────────┘  │
+       ▼ 无工具调用                         │是        │
+   助手要停了 ────────► 内层结束 ────────────┘          │
+       │                                             │
+       ▼ followUp 队列非空? ──是──► 再开一批回合 ──────┘
+       ▼ 否
+    agent_end（run 结束）
+       ▼
+  session 后处理: retry? → compaction? → 收尾 → agent_settled</code></pre>
+
+<h2>3. 一次具体旅程：让它读文件</h2>
+<p>假设 agent 收到 prompt：<em>“看看当前目录有什么文件”</em>，它决定调用 <code>ls</code> 工具。这是从源码里读出来的真实时序（文件：<code>agent-loop.ts</code> 的 <code>runLoop</code>、<code>agent-session.ts</code> 的 <code>prompt/_runAgentPrompt</code>）：</p>
+<table>
+<thead><tr><th>#</th><th>谁</th><th>做了什么</th><th>订阅者看到的事件</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>session</td><td><code>prompt()</code>：展开命令/模板 → 校验 model+auth → 检查 compaction → 拼好 user 消息 → <code>agent.prompt(msg)</code></td><td>—</td></tr>
+<tr><td>2</td><td>agent</td><td>把新消息推入上下文，开始 <code>runLoop</code></td><td><code>agent_start</code> · <code>message_start/end</code>（user 消息）· <code>turn_start</code></td></tr>
+<tr><td>3</td><td>agent</td><td>上下文 <code>convertToLlm</code> → 调 <code>streamFn(model)</code> 请求模型</td><td>—</td></tr>
+<tr><td>4</td><td>model</td><td>流式返回：说“我用 ls”，并声明 <code>toolCall ls</code></td><td><code>message_update</code>（<code>text_delta</code>、<code>toolcall_*</code>）</td></tr>
+<tr><td>5</td><td>agent</td><td>助手消息完整、内含 1 个 toolCall → 执行阶段</td><td><code>message_end</code></td></tr>
+<tr><td>6</td><td>agent→tools</td><td>找到 <code>ls</code> 工具，校验参数，执行</td><td><code>tool_execution_start</code> → <code>tool_execution_update</code>（流式输出）</td></tr>
+<tr><td>7</td><td>agent</td><td>把工具输出包成 <code>toolResult</code> 消息，推入上下文</td><td><code>tool_execution_end</code>，随后 toolResult 的 <code>message_start/end</code></td></tr>
+<tr><td>8</td><td>agent</td><td>该回合带工具调用 → 继续内层循环，<strong>带工具结果再调一次模型（第 2 回合）</strong></td><td><code>turn_end</code> → <code>turn_start</code></td></tr>
+<tr><td>9</td><td>model</td><td>基于工具结果返回最终答案（无 toolCall）</td><td><code>message_update</code>（<code>text_delta</code>）</td></tr>
+<tr><td>10</td><td>agent</td><td>无工具调用、无排队消息 → run 结束</td><td><code>message_end</code> · <code>turn_end</code> · <code>agent_end</code></td></tr>
+<tr><td>11</td><td>session</td><td>后处理 <code>_handlePostAgentRun</code>：需要 retry？需要 compaction？都没有 → 收尾</td><td><code>agent_settled</code></td></tr>
+</tbody>
+</table>
+<p>注意第 8 步是关键转折：<strong>工具结果不是“额外回报给用户”，而是变成一条消息塞回上下文，让模型在下一回合看到它。</strong>你订阅时看到的那一串 <code>turn_start/turn_end</code>，就是第 2 回合、第 3 回合……的边界。</p>
+
+<h2>4. 事件发生在哪一拍</h2>
+<p><code>session.subscribe()</code> 收到的 = Agent 核心事件（去掉 <code>agent_end</code> 后）<strong>再加上</strong> session 自己的事件。对照起来记：</p>
+<table>
+<thead><tr><th>事件</th><th>在哪一拍发出</th><th>来源层</th></tr></thead>
+<tbody>
+<tr><td><code>agent_start</code> / <code>agent_end</code></td><td>一次 run 的开头 / 结尾</td><td>agent</td></tr>
+<tr><td><code>turn_start</code> / <code>turn_end</code></td><td>每个回合边界（一次 run 内可能有多个）</td><td>agent</td></tr>
+<tr><td><code>message_start / message_end</code></td><td>每条消息（user / 助手 / toolResult）进入与定型</td><td>agent</td></tr>
+<tr><td><code>message_update</code></td><td>助手消息流式增量（文本/思考/工具声明）</td><td>agent</td></tr>
+<tr><td><code>tool_execution_start/update/end</code></td><td>某个工具调用的执行前后</td><td>agent</td></tr>
+<tr><td><code>agent_settled</code></td><td>run 真正结束、包括 retry/compaction 决策做完之后</td><td><strong>session</strong></td></tr>
+<tr><td><code>queue_update</code></td><td>steer/followUp 队列变化</td><td><strong>session</strong></td></tr>
+<tr><td><code>auto_retry_start/end</code> · <code>compaction_start/end</code></td><td>session 在 run 之间做的重试 / 压缩</td><td><strong>session</strong></td></tr>
+</tbody>
+</table>
+<p>一句话帮你记忆：<strong>「turn 和 message 是 agent 在跑；settled、retry、compaction 是 session 在操心。」</strong>把事件归到“谁在发出”，你的代码就能写对——比如“整个 run 彻底结束”该等 <code>agent_settled</code>，而不是 <code>agent_end</code>（<code>agent_end</code> 之后 session 可能还要 retry/compact）。</p>
+
+<h2>5. 三个反直觉的设计洞见</h2>
+<h3>① Agent 是「单飞」的（single-flight）</h3>
+<p>一个 <code>Agent</code> 同时只跑一个 run（源码里 <code>activeRun</code>）。所以 <strong>正在流式时再调 <code>prompt()</code> 会直接抛错</strong>——你必须走 <code>steer()</code>（插话）或 <code>followUp()</code>（等它停再说）。这解释了你在 SDK 文档里见过的 <code>streamingBehavior</code> 选项：它不是锦上添花，是这条约束逼出来的。</p>
+<h3>② 上下文就是「消息序列」，工具结果也是消息</h3>
+<p>模型看到的一切 = <code>state.messages</code>（+ systemPrompt + tools）。工具执行的产出不是旁路数据，而是被包成 <code>toolResult</code> 角色消息，成为下一回合上下文的一部分。你自定义工具时返回的 <code>content</code>，最终就是进入这里的一段文本。</p>
+<h3>③ Session 是 Agent 的监护人，不是 Agent 本身</h3>
+<p>命令展开、skill 块、prompt 模板、auth 校验、自动重试、压缩、事件里的 <code>agent_settled</code>——<strong>全在 session 层，不在 agent 层</strong>。Agent 核心只干一件事：对着当前 state 跑到没活干。这个边界意味着：如果你想把 pi 的循环嵌进一个很自定义的宿主，你复用的是 <code>Agent</code>/<code>runAgentLoop</code>；如果你想要开箱即用的全部照料，你用 <code>AgentSession</code>。</p>
+
+<h2>6. 检验：五个问题</h2>
+
+<div class="quiz" data-explain="关键在‘会话是否连续’。Agent 核心与 Session 都无 UI、与具体工具无关；区别是 Session 额外承担命令/模板/重试/压缩这些照料。分层取决于职责与照料范围，不取决于‘是否流式’（流式只是 single-flight 的后果）。">
+<p class="q">Q1. 以下哪个说法正确描述了「agent 核心」与「session」的边界？</p>
+<div class="opts">
+<button data-correct="false">agent 负责输出流，session 负责工具实现</button>
+<button data-correct="false">agent 只做工具，session 才调用大模型</button>
+<button data-correct="true">agent 跑循环，session 负责重试与压缩</button>
+<button data-correct="false">session 管交互，agent 只处理静态文本</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="内层循环的驱动力就是‘本回合带了工具调用，必须再来一回合吃工具结果’。followUp 队列是外层在‘本该停止时’的续跑来源。">
+<p class="q">Q2. 内层循环「再来一回合」的触发条件是什么？</p>
+<div class="opts">
+<button data-correct="true">上回合的助手消息里带有工具调用</button>
+<button data-correct="false">上回合文本流式输出仍然没有结束</button>
+<button data-correct="false">用户消息被 skill 块进行了展开</button>
+<button data-correct="false">模型请求发生超时并自动重试</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="agent_end 只表示 loop 不再发事件；session 之后还可能 retry/compaction，所以要把‘整个 run 做完’的收尾放在 agent_settled。">
+<p class="q">Q3. 想表示「一次 prompt 的 run 彻底结束」应监听哪个事件？</p>
+<div class="opts">
+<button data-correct="false">agent_end 之后已无任何后续动作</button>
+<button data-correct="true">agent_settled 才是真正收尾信号</button>
+<button data-correct="false">message_end 表示最后一条已定型</button>
+<button data-correct="false">turn_end 表示最后回合已结束</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="工具产出的文本被包成 toolResult 角色消息推回上下文，模型下一回合看到它——不是旁路、不是给用户的额外输出。">
+<p class="q">Q4. 工具执行的结果是怎么回到模型那里的？</p>
+<div class="opts">
+<button data-correct="true">被包成消息塞回下一回合的上下文</button>
+<button data-correct="false">以回调形式直接更新系统提示词</button>
+<button data-correct="false">先写盘再由用户消息重新引用</button>
+<button data-correct="false">作为流式事件绕开上下文直发模型</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="Agent 是单飞约束：正在流式时 prompt() 会抛错。steer 表示插话（当前回合工具结束后注入），followUp 表示等 agent 本要停时再跑。">
+<p class="q">Q5. 正在流式时，哪条是合法的继续输入方式？</p>
+<div class="opts">
+<button data-correct="true">用 session.steer() 或 followUp() 入队</button>
+<button data-correct="false">直接再次 await session.prompt()</button>
+<button data-correct="false">改写 agent.state.messages 后继续</button>
+<button data-correct="false">等 message_end 后立刻新建 run</button>
+</div>
+</div>
+
+<h2>7. 一手阅读（本课推荐精读）</h2>
+<p>这一课的全部结论都来自两个文件，建议你现在就翻一遍（各 ~100 行就够）：</p>
+<ul>
+<li><code>packages/agent/src/agent-loop.ts</code> —— 看 <code>runLoop()</code>（内外两层 while）和 <code>streamAssistantResponse()</code>，对照第 2–3 节。</li>
+<li><code>packages/agent/src/agent.ts</code> —— 看 <code>processEvents()</code> 的 switch（状态怎么随事件推进）和 <code>prompt()/continue()</code>（single-flight 的体现），对照第 4–5 节。</li>
+</ul>
+<p>想先读文档再啃源码的话：<code>packages/coding-agent/docs/sdk.md</code> 的 “Prompting and Message Queueing” 与 “Events” 两节，与本节课互相对应。</p>
+
+<div class="footer">
+<p><strong>有任何不清楚的地方，直接问导师</strong>（这个 agent）。比如：“内层和外层循环我在源码里哪个函数看到？”、“<code>prepareNextTurn</code> 在循环里什么时候被调？”——下节课我们会在五层地图里挑一层深挖，也可以按你的疑问调整顺序。</p>
+<p class="sources">下一课：② Agent 核心内部 —— state、事件推进、单飞、队列与五个钩子。源码：agent/src/agent.ts 与 types.ts。</p>
+</div>
+
+</main>
+</body>
+</html>

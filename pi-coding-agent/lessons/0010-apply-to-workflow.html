@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 10 课 · 综合：把架构知识用回你的 workflow</title>
+<link rel="stylesheet" href="../assets/learn.css">
+<script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+
+<p class="meta">LESSON 0010 · pi-coding-agent 架构课 · <a href="../lessons/0009-modes.html">← 第 9 课</a> · 收尾</p>
+
+<h1>综合：把九课的知识用回你的 workflow</h1>
+<p class="lead">前九课是「地图」，这一课是「导航」：把这些架构约束翻译成你那个「从需求澄清到测试报告」的固定流程应用里的一组设计决策。没有新源码，只有决策。</p>
+
+<div class="callout"><strong>本课成果</strong>：拿到一张「workflow 设计自检表」，能用它审视你现有实现：哪里做得对、哪里踩了架构约束、哪里可以更省。</div>
+
+<h2>0. 九十秒回顾（九课压成一段话）</h2>
+<p><strong>一次 prompt = 一串回合。</strong> Agent 核心对着 state（messages/model/tools/systemPrompt）跑到没活干，把工具结果当消息回灌；Agent 单飞，流式时只能 steer/followUp。Session 是监护人：进门先过命令/模板/拦截/auth/压缩检查，出门做 retry/compaction 再发 agent_settled。资源由 ResourceLoader 发现，会话是 SessionManager 里一棵能分支的树，模型来自 ModelRuntime。以上全部，mode 只是驾驶舱，SDK 与它同源。</p>
+
+<h2>1. 第一个决策：步骤用「一个长会话」还是「每步新会话」</h2>
+<p>这是你 workflow 最核心的架构选择，用九课学到的约束来对答案：</p>
+<table>
+<thead><tr><th></th><th>A. 一个 AgentSession 串到底</th><th>B. 每步新建 AgentSession</th></tr></thead>
+<tbody>
+<tr><td>上下文</td><td>全历史共享；长了靠 compaction（阈值 = 窗口−预留 16k）</td><td>每步干净；跨步上下文需显式传递</td></tr>
+<tr><td>单飞影响</td><td>同会话天然串行，一次一个 run</td><td>不同 session 可并行（互不阻塞）</td></tr>
+<tr><td>工具/模型</td><td>步骤间需手改 state（setModel / 换 state.tools）</td><td>每步 createAgentSession 时各配各的，天然隔离</td></tr>
+<tr><td>污染风险</td><td>上一步的杂讯留在上下文，可能带偏下一步</td><td>低——每步只看到你喂进去的</td></tr>
+<tr><td>断点续跑</td><td>天然（session 文件/树）</td><td>需自己持久化步骤产物做检查点</td></tr>
+</tbody>
+</table>
+<div class="callout"><strong>给你的倾向（可用你的真实场景推翻）</strong>：固定 pipeline + 各步职责差异大（澄清 vs 建模 vs 测试）→ <strong>B 更干净</strong>：每步一个短命 session，工具/模型各配，跨步只传「上一层的结论摘要 + 产物路径」。只有当你的某几步确实需要「记得整段对话」时才为那几步改用 A 或复用同一 session。</div>
+
+<h2>2. 如果选 B：跨步传什么？</h2>
+<p>第 6、7 课给了你现成范式——<strong>压缩总结与 branch_summary 的格式就是「给续作 LLM 的上下文」的范本</strong>。跨步上下文别塞原始对话，传：</p>
+<ul>
+<li><strong>结构化结论</strong>（需求要点、决策、产出物路径），像 checkpoint 总结那样写给下一步的模型看</li>
+<li><strong>产物引用</strong>：测试报告、代码在磁盘哪，让下一步 agent 用 read 工具自己读（呼应第 8 课「按需读文件省窗口」）</li>
+<li><strong>约束与待办</strong>：哪些别改、哪些必做</li>
+</ul>
+<p>实现上：每步用 <code>SessionManager.inMemory()</code> 或持久化到独立 jsonl，作为该步检查点；步骤衔接用你编排层自己的「步骤产物对象」，不靠会话树跨 session（树是文件内的）。</p>
+
+<h2>3. 若干具体的架构坑（对应前九课）</h2>
+<table>
+<thead><tr><th>坑</th><th>第几课的约束</th><th>对策</th></tr></thead>
+<tbody>
+<tr><td>步骤提示词以 <code>/</code> 开头，被当成命令吞掉</td><td>⑤ prompt 管线第 1 步</td><td>避免裸 <code>/</code> 开头；或检查扩展命令表</td></tr>
+<tr><td>长步骤中途用户想插话，直接再 prompt() 抛错</td><td>② single-flight</td><td>用 steer()（插话）或 followUp()（续跑）</td></tr>
+<tr><td>步骤没配 key，模型跑一半才报错</td><td>④ auth 前置校验</td><td>步骤前用 <code>modelRuntime.getAvailable()</code> 预检，给干净错误</td></tr>
+<tr><td>选了目录里有但没 key 的模型</td><td>④ getModel vs getAvailable</td><td>自动选型一律走 getAvailable</td></tr>
+<tr><td>把「agent_end」当「跑完」，统计/落库提前</td><td>①⑤ settled 语义</td><td>收尾逻辑等 <code>agent_settled</code>，或 <code>await prompt()</code>（它含 retry/compaction）</td></tr>
+<tr><td>上下文越长越慢还偶发截断（stopReason length）</td><td>⑥ compaction / ③ 截断整批失败</td><td>长步骤用 B 模式保持上下文短；或接受 compaction</td></tr>
+<tr><td>想并行两个 agent 步骤，共用一个 session</td><td>② single-flight 禁止</td><td>两个独立 AgentSession 并行，各自 inMemory</td></tr>
+</tbody>
+</table>
+
+<h2>4. workflow 设计自检表（拿去用）</h2>
+<ul>
+<li>☐ 每一步的「输入上下文」我明确知道是哪几条消息吗？（不靠隐式全历史）</li>
+<li>☐ 跨步传递的是「结构化结论 + 产物引用」而不是原始对话吗？</li>
+<li>☐ 每步的工具集 / 模型 / 思考等级是否按需配置、互不越界？</li>
+<li>☐ 有 auth 预检，没配 key 不会到模型那步才炸吗？</li>
+<li>☐ 步骤完成信号用的是 settled/prompt resolve 而非 agent_end 吗？</li>
+<li>☐ 长任务有断点（持久化产物/标签），失败能从中断处续跑吗？</li>
+<li>☐ 需要并行的步骤用了独立 session 吗？</li>
+<li>☐ 提示词不会误触发 <code>/命令</code> / skill 块展开吗？</li>
+</ul>
+
+<h2>5. 检验（决策题）</h2>
+
+<div class="quiz" data-explain="固定 pipeline 各步职责差异大时，每步新会话上下文干净、工具模型各配、可并行；跨步传结论+产物引用。">
+<p class="q">Q1. 对固定多步 pipeline，更稳妥的默认是？</p>
+<div class="opts">
+<button data-correct="false">一个长会话串完所有步骤省心</button>
+<button data-correct="true">每步独立会话上下文干净</button>
+<button data-correct="false">一个会话但每步换模型即可</button>
+<button data-correct="false">依赖 compaction 解决一切问题</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="传给下一步的是结构化结论+产物路径引用，让下步 agent 用 read 按需读，而不是倾倒原始对话。">
+<p class="q">Q2. 跨步传递上下文的推荐形态是？</p>
+<div class="opts">
+<button data-correct="false">上一步全部原始消息原样搬运</button>
+<button data-correct="true">结构化结论加产物路径引用</button>
+<button data-correct="false">仅共享同一个会话文件句柄</button>
+<button data-correct="false">把所有工具结果拼接成一段文</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="agent_end 之后 session 还可能有 retry/compaction；真正跑完用 settled 或 await prompt()（含重试）。">
+<p class="q">Q3. 步骤「真正完成」的信号应该用哪个？</p>
+<div class="opts">
+<button data-correct="false">agent_end 事件一收到就算完</button>
+<button data-correct="true">agent_settled 或 await prompt() 返回</button>
+<button data-correct="false">turn_end 无工具调用即可确认</button>
+<button data-correct="false">message_end 最后一条即完成</button>
+</div>
+</div>
+
+<div class="quiz" data-explain="single-flight 使单个 session 同一时刻只能跑一个 run；并行需求要开独立 session。">
+<p class="q">Q4. 两个可并行的 agent 步骤应如何组织？</p>
+<div class="opts">
+<button data-correct="false">同一 session 用 followUp 排队顺序跑</button>
+<button data-correct="true">两个独立 session 各自并行运行</button>
+<button data-correct="false">同一 session 内多次 prompt 并发提交</button>
+<button data-correct="false">把两个任务拼进一句话让 agent 分办</button>
+</div>
+</div>
+
+<h2>6. 收尾：接下来怎么深</h2>
+<p>十课已把五层地图走完一遍。若想继续，按你的兴趣有三条延伸：</p>
+<ul>
+<li><strong>读懂扩展 API 全貌</strong> → 精读 <code>docs/extensions.md</code> + <code>examples/extensions/</code>（与资源加载课衔接）</li>
+<li><strong>自己造一个「驾驶舱」</strong> → 用 runtime + 自定义输入输出壳，把你的 workflow 变成一个常驻服务（衔接第 9 课）</li>
+<li><strong>深入 pi-ai</strong> → provider 如何接入、流式 transport 如何工作（衔接第 4 课）</li>
+</ul>
+<p>想让导师带哪条，或带着你真实 workflow 代码逐段对照自检表走一遍，直接说。</p>
+
+<div class="footer">
+<p>有收获/有疑问都告诉导师。导师可以：①按你的代码逐行对照架构讲解；②把某课展开成更细的实操；③更新任务书——如果你发现真正想学的东西变了。</p>
+<p class="sources">配套：《<a href="../reference/architecture-map.html">架构速查卡</a>》把所有图的压缩版放在一张可打印页里。</p>
+</div>
+
+</main>
+</body>
+</html>
